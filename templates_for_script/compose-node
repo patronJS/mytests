@@ -13,8 +13,8 @@ services:
       SSL_CLIENT_CERT_FILE: "/tmp/ssl_client_cert.pem"
       SERVICE_PROTOCOL: "rest"
     volumes:
-      - ./xray-core:/tmp/xray-core
-      - ./ssl_client_cert.pem:/tmp/ssl_client_cert.pem
+      - ./xray-core:/tmp/xray-core:ro
+      - ./ssl_client_cert.pem:/tmp/ssl_client_cert.pem:ro
   angie:
     image: docker.angie.software/angie:minimal
     container_name: angie
@@ -22,8 +22,8 @@ services:
     network_mode: host
     volumes:
       - angie-data:/var/lib/angie
-      - ./angie.conf:/etc/angie/angie.conf
-      - ./index.html:/tmp/index.html
+      - ./angie.conf:/etc/angie/angie.conf:ro
+      - ./index.html:/tmp/index.html:ro
 
 volumes:
   angie-data:

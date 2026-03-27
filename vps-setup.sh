@@ -1,9 +1,10 @@
-#/bin/bash
+#!/bin/bash
 
-set -e
+set -euo pipefail
 
 export GIT_BRANCH="main"
 export GIT_REPO="Akiyamov/xray-vps-setup"
+export XRAY_VERSION="v26.3.23"
 
 # Check if script started as root
 if [ "$EUID" -ne 0 ]
@@ -31,7 +32,7 @@ esac
 # Read domain input
 read -ep "Enter your domain:"$'\n' input_domain
 
-export VLESS_DOMAIN=$(echo $input_domain | idn)
+export VLESS_DOMAIN=$(echo "$input_domain" | idn)
 
 SERVER_IPS=($(hostname -I))
 
@@ -87,6 +88,7 @@ else
   marzban_input="n"
 fi
 
+configure_ssh_input="n"
 read -ep "Do you want to create a user to connect to server as non-root and forbid root access? Do this on first run only. [y/N] "$'\n' configure_ssh_input
 if [[ ${configure_ssh_input,,} == "y" ]]; then
   # Read SSH port
@@ -98,11 +100,9 @@ if [[ ${configure_ssh_input,,} == "y" ]]; then
   # Read SSH Pubkey
   read -ep "Enter SSH public key:"$'\n' input_ssh_pbk
   echo "$input_ssh_pbk" > ./test_pbk
-  ssh-keygen -l -f ./test_pbk
-  PBK_STATUS=$(echo $?)
-  if [ "$PBK_STATUS" -eq 255 ]; then
+  if ! ssh-keygen -l -f ./test_pbk; then
     echo "Can't verify the public key. Try again and make sure to include 'ssh-rsa' or 'ssh-ed25519' followed by 'user@pcname' at the end of the file."
-    exit
+    exit 1
   fi
   rm ./test_pbk
 fi
@@ -119,7 +119,7 @@ if [[ "$INSTALL_MODE" != "node" ]]; then
 fi
 
 # Check congestion protocol
-if sysctl net.ipv4.tcp_congestion_control | grep bbr; then
+if sysctl net.ipv4.tcp_congestion_control | grep -q bbr; then
     echo "BBR is already used"
 else
     echo "net.core.default_qdisc=fq" >> /etc/sysctl.conf
@@ -168,20 +168,24 @@ xray_setup() {
     export MARZBAN_SUB_PATH=$(openssl rand -hex 8)
     mkdir -p /opt/xray-vps-setup/xray-core
     if [[ "$ARCH" == "amd64" ]]; then
-      wget -O /tmp/xray.zip https://github.com/XTLS/Xray-core/releases/download/v26.2.6/Xray-linux-64.zip
+      wget -O /tmp/xray.zip https://github.com/XTLS/Xray-core/releases/download/$XRAY_VERSION/Xray-linux-64.zip
     elif [[ "$ARCH" == "arm64" ]]; then
-      wget -O /tmp/xray.zip https://github.com/XTLS/Xray-core/releases/download/v26.2.6/Xray-linux-arm64-v8a.zip
+      wget -O /tmp/xray.zip https://github.com/XTLS/Xray-core/releases/download/$XRAY_VERSION/Xray-linux-arm64-v8a.zip
     fi
     unzip -qo /tmp/xray.zip -d /opt/xray-vps-setup/xray-core
     wget -qO- https://raw.githubusercontent.com/$GIT_REPO/refs/heads/$GIT_BRANCH/templates_for_script/compose-marzban | envsubst > ./docker-compose.yml
     wget -qO- https://raw.githubusercontent.com/$GIT_REPO/refs/heads/$GIT_BRANCH/templates_for_script/marzban | envsubst > ./marzban/.env
     wget -qO- "https://raw.githubusercontent.com/$GIT_REPO/refs/heads/$GIT_BRANCH/templates_for_script/angie-marzban" | envsubst '$VLESS_DOMAIN $MARZBAN_PATH $MARZBAN_SUB_PATH' > ./angie.conf
     wget -qO- "https://raw.githubusercontent.com/$GIT_REPO/refs/heads/$GIT_BRANCH/templates_for_script/xray" | envsubst > ./marzban/xray_config.json
+    chmod 600 ./marzban/xray_config.json ./marzban/.env
+    chmod 644 ./angie.conf ./index.html ./docker-compose.yml
   else
     mkdir -p /opt/xray-vps-setup/xray
     wget -qO- https://raw.githubusercontent.com/$GIT_REPO/refs/heads/$GIT_BRANCH/templates_for_script/compose-xray | envsubst > ./docker-compose.yml
     wget -qO- "https://raw.githubusercontent.com/$GIT_REPO/refs/heads/$GIT_BRANCH/templates_for_script/xray" | envsubst > ./xray/config.json
     wget -qO- "https://raw.githubusercontent.com/$GIT_REPO/refs/heads/$GIT_BRANCH/templates_for_script/angie" | envsubst '$VLESS_DOMAIN'  > ./angie.conf
+    chmod 600 ./xray/config.json
+    chmod 644 ./angie.conf ./index.html ./docker-compose.yml
   fi
 }
 
@@ -192,9 +196,9 @@ node_setup() {
   apt install zip unzip -y
   mkdir -p ./xray-core
   if [[ "$ARCH" == "amd64" ]]; then
-    wget -O /tmp/xray.zip https://github.com/XTLS/Xray-core/releases/download/v26.2.6/Xray-linux-64.zip
+    wget -O /tmp/xray.zip https://github.com/XTLS/Xray-core/releases/download/$XRAY_VERSION/Xray-linux-64.zip
   elif [[ "$ARCH" == "arm64" ]]; then
-    wget -O /tmp/xray.zip https://github.com/XTLS/Xray-core/releases/download/v26.2.6/Xray-linux-arm64-v8a.zip
+    wget -O /tmp/xray.zip https://github.com/XTLS/Xray-core/releases/download/$XRAY_VERSION/Xray-linux-arm64-v8a.zip
   fi
   unzip -qo /tmp/xray.zip -d ./xray-core
   # Placeholder - will be replaced with panel cert by node_api_setup
@@ -393,23 +397,27 @@ iptables-persistent iptables-persistent/autosave_v6 boolean true
 EOF
 apt-get install iptables-persistent netfilter-persistent -y
 
+iptables_add() {
+  iptables -C "$@" 2>/dev/null || iptables -A "$@"
+}
+
 edit_iptables_node() {
   PANEL_IP=$(dig +short $PANEL_DOMAIN | tail -n1)
-  iptables -A INPUT -s $PANEL_IP -p tcp -m tcp --dport 62001 -j ACCEPT
-  iptables -A INPUT -s $PANEL_IP -p tcp -m tcp --dport 62002 -j ACCEPT
-  iptables -A INPUT -p tcp -m tcp --dport 62001 -j REJECT --reject-with tcp-reset
-  iptables -A INPUT -p tcp -m tcp --dport 62002 -j REJECT --reject-with tcp-reset
+  iptables_add INPUT -s $PANEL_IP -p tcp -m tcp --dport 62001 -j ACCEPT
+  iptables_add INPUT -s $PANEL_IP -p tcp -m tcp --dport 62002 -j ACCEPT
+  iptables_add INPUT -p tcp -m tcp --dport 62001 -j REJECT --reject-with tcp-reset
+  iptables_add INPUT -p tcp -m tcp --dport 62002 -j REJECT --reject-with tcp-reset
 }
 
 # Configure iptables
 edit_iptables() {
-  iptables -A INPUT -p icmp -j ACCEPT
-  iptables -A INPUT -m state --state RELATED,ESTABLISHED -j ACCEPT
-  iptables -A INPUT -p tcp -m state --state NEW -m tcp --dport $SSH_PORT -j ACCEPT
-  iptables -A INPUT -p tcp -m tcp --dport 80 -j ACCEPT
-  iptables -A INPUT -p tcp -m tcp --dport 443 -j ACCEPT
-  iptables -A INPUT -i lo -j ACCEPT
-  iptables -A OUTPUT -o lo -j ACCEPT
+  iptables_add INPUT -p icmp -j ACCEPT
+  iptables_add INPUT -m state --state RELATED,ESTABLISHED -j ACCEPT
+  iptables_add INPUT -p tcp -m state --state NEW -m tcp --dport $SSH_PORT -j ACCEPT
+  iptables_add INPUT -p tcp -m tcp --dport 80 -j ACCEPT
+  iptables_add INPUT -p tcp -m tcp --dport 443 -j ACCEPT
+  iptables_add INPUT -i lo -j ACCEPT
+  iptables_add OUTPUT -o lo -j ACCEPT
   iptables -P INPUT DROP
 }
 if [[ "$INSTALL_MODE" == "node" ]]; then
@@ -428,7 +436,7 @@ warp_install() {
   apt install gpg -y
   echo "If this fails then warp won't be added to routing and everything will work without it"
   curl -fsSL https://pkg.cloudflareclient.com/pubkey.gpg | gpg --yes --dearmor --output /usr/share/keyrings/cloudflare-warp-archive-keyring.gpg
-  echo "deb [signed-by=/usr/share/keyrings/cloudflare-warp-archive-keyring.gpg] https://pkg.cloudflareclient.com/ $(lsb_release -cs) main" | tee /etc/apt/sources.list.d/cloudflare-client.list
+  echo "deb [signed-by=/usr/share/keyrings/cloudflare-warp-archive-keyring.gpg] https://pkg.cloudflareclient.com/ $(. /etc/os-release && echo $VERSION_CODENAME) main" | tee /etc/apt/sources.list.d/cloudflare-client.list
   apt update 
   apt install cloudflare-warp -y
   

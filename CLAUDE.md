@@ -4,21 +4,18 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Ansible role + standalone bash script for automated VPS setup with VLESS proxy (XRay/Marzban) behind Angie (nginx fork) with REALITY protocol. Published on [Ansible Galaxy](https://galaxy.ansible.com/ui/standalone/roles/Akiyamov/xray-vps-setup/install/) as `Akiyamov.xray-vps-setup`.
+Standalone bash script for automated VPS setup with VLESS proxy (XRay/Marzban) behind Angie (nginx fork) with REALITY protocol.
 
 Three installation modes:
 - **xray** — standalone XRay VLESS server
 - **marzban** — Marzban panel with XRay backend
-- **node** — Marzban node connecting to an existing panel (script only)
+- **node** — Marzban node connecting to an existing panel
 
 ## Architecture
 
-### Dual delivery mechanism
+### Delivery mechanism
 
-1. **Ansible role** (`tasks/`, `templates/`, `handlers/`, `defaults/`, `vars/`, `meta/`) — uses Jinja2 templates (`.j2`) and `setup_variant` variable to branch between xray/marzban
-2. **Bash script** (`vps-setup.sh`) — self-contained installer that downloads config templates from `templates_for_script/` via raw GitHub URLs, uses `envsubst` for templating
-
-Both paths produce the same result: Docker Compose stack in `/opt/xray-vps-setup/` with Angie + XRay/Marzban containers using `network_mode: host`.
+**Bash script** (`vps-setup.sh`) — self-contained installer that downloads config templates from `templates_for_script/` via raw GitHub URLs, uses `envsubst` for templating. Produces a Docker Compose stack in `/opt/xray-vps-setup/` with Angie + XRay/Marzban containers using `network_mode: host`.
 
 ### Traffic flow
 
@@ -29,27 +26,11 @@ Client → :80 → Angie → 301 redirect to HTTPS
 
 XRay listens on 443, handles VLESS with REALITY, and forwards to local Angie only for certificate management via ACME. Marzban panel (when used) is reverse-proxied by Angie at randomized paths.
 
-### Key variables (Ansible)
-
-- `domain` — server domain
-- `setup_variant` — `"marzban"` or `"xray"`
-- `setup_warp` — enable Cloudflare WARP for Russian sites routing
-
 ### Generated secrets
 
-Both paths generate at runtime: x25519 key pair (PIK/PBK), XRay UUID, and (for marzban) admin credentials + randomized panel/subscription paths.
+The script generates at runtime: x25519 key pair (PIK/PBK), XRay UUID, and (for marzban) admin credentials + randomized panel/subscription paths.
 
 ## Commands
-
-### Ansible
-
-```bash
-# Test role locally
-ansible-playbook tests/test.yml --connection=local
-
-# Run against remote host (requires inventory.yml and playbook.yml — gitignored)
-ansible-playbook playbook.yml -e "domain=example.com setup_variant=xray"
-```
 
 ### Script
 
@@ -65,25 +46,27 @@ docker compose -f /opt/xray-vps-setup/docker-compose.yml up -d
 docker compose -f /opt/xray-vps-setup/docker-compose.yml down
 ```
 
-## File Mapping
+## Script Templates (`templates_for_script/`)
 
-| Ansible template (`templates/`) | Script template (`templates_for_script/`) | Purpose |
-|---|---|---|
-| `angie.conf.j2` | `angie`, `angie-marzban` | Angie config (script has separate files for xray/marzban) |
-| `xray.json.j2` | `xray` | XRay inbound config |
-| `docker_compose.yml.j2` | `compose-xray`, `compose-marzban`, `compose-node` | Docker Compose (script has separate files per mode) |
-| `marzban.j2` | `marzban` | Marzban `.env` |
-| `confluence.j2` | `confluence` | Camouflage HTML page |
+| Template | Purpose |
+|---|---|
+| `angie` | Angie config for xray mode |
+| `angie-marzban` | Angie config for marzban mode |
+| `xray` | XRay inbound config |
+| `compose-xray` | Docker Compose for xray mode |
+| `compose-marzban` | Docker Compose for marzban mode |
+| `compose-node` | Docker Compose for node mode |
+| `marzban` | Marzban `.env` |
+| `confluence` | Camouflage HTML page |
 
-Ansible uses Jinja2 conditionals (`{% if setup_variant == "marzban" %}`), script uses separate template files per mode.
+Templates use `$ENVVAR` syntax (processed via `envsubst`).
 
 ## Important Notes
 
 - Ports 80, 443, 4123 are reserved — SSH must not use them
 - WARP integration patches XRay config post-deploy via `yq` to add SOCKS outbound on port 40000
-- `templates_for_script/` uses `$ENVVAR` syntax (for `envsubst`), `templates/` uses `{{ var }}` syntax (Jinja2)
-- XRay core version is pinned to v26.2.6 in both `install_marzban.yml` and `vps-setup.sh`
-- The `install_docker.yml` task hardcodes Ubuntu `focal` repo — may need updating for other distros
+- `templates_for_script/` uses `$ENVVAR` syntax (for `envsubst`)
+- XRay core version is pinned to v26.3.23 in `vps-setup.sh`
 
 ## Cascade Mode (Two-VPS Bridge)
 
@@ -131,7 +114,7 @@ Client → VPS2:51820 (WireGuard) → WG tunnel → VPS1 → Internet
 
 ### Cascade-Specific Notes
 
-- XHTTP transport requires XRay >= v26.2.6 (pinned to v26.3.23)
+- XHTTP transport requires XRay >= v26.3.23 (pinned to v26.3.23)
 - `flow: xtls-rprx-vision` MUST NOT be set on XHTTP inbounds or outbounds
 - `mode: "stream-one"` pinned in chain outbound (auto has bug #5635)
 - VPS2 WG tunnel uses `Table = off` to prevent wg-quick from hijacking host routes

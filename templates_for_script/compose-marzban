@@ -6,8 +6,8 @@ services:
     network_mode: host
     volumes:
       - angie-data:/var/lib/angie
-      - ./angie.conf:/etc/angie/angie.conf
-      - ./index.html:/tmp/index.html
+      - ./angie.conf:/etc/angie/angie.conf:ro
+      - ./index.html:/tmp/index.html:ro
   marzban:
     image: gozargah/marzban:latest
     container_name: marzban
@@ -15,8 +15,8 @@ services:
     env_file: ./marzban/.env
     network_mode: host
     volumes:
-      - ./marzban/xray_config.json:/code/xray_config.json
-      - ./xray-core:/code/xray-core
+      - ./marzban/xray_config.json:/code/xray_config.json:ro
+      - ./xray-core:/code/xray-core:ro
       - ./marzban_lib:/var/lib/marzban
 
 volumes:

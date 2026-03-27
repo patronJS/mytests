@@ -20,7 +20,7 @@ TEMPLATE_URL="https://raw.githubusercontent.com/$GIT_REPO/refs/heads/$GIT_BRANCH
 # Read domain input
 read -ep "Enter your domain:"$'\n' input_domain
 
-export VLESS_DOMAIN=$(echo $input_domain | idn)
+export VLESS_DOMAIN=$(echo "$input_domain" | idn)
 
 SERVER_IPS=($(hostname -I))
 
@@ -98,11 +98,9 @@ if [[ ${configure_ssh_input,,} == "y" ]]; then
 
   read -ep "Enter SSH public key:"$'\n' input_ssh_pbk
   echo "$input_ssh_pbk" > ./test_pbk
-  ssh-keygen -l -f ./test_pbk
-  PBK_STATUS=$(echo $?)
-  if [ "$PBK_STATUS" -eq 255 ]; then
+  if ! ssh-keygen -l -f ./test_pbk; then
     echo "Can't verify the public key. Try again and make sure to include 'ssh-rsa' or 'ssh-ed25519' followed by 'user@pcname' at the end of the file."
-    exit
+    exit 1
   fi
   rm ./test_pbk
 fi
@@ -183,7 +181,7 @@ chmod 600 /etc/wireguard/wg-tunnel.conf
 systemctl enable --now wg-quick@wg-tunnel
 
 # DNS fallback — ensure panel domain resolves even without public DNS propagation
-echo "$VPS1_IP $PANEL_DOMAIN" >> /etc/hosts
+grep -q "$PANEL_DOMAIN" /etc/hosts || echo "$VPS1_IP $PANEL_DOMAIN" >> /etc/hosts
 
 # Start angie + wg-easy only (marzban-node needs cert from panel first)
 docker compose -f /opt/xray-vps-setup/docker-compose.yml up -d angie wg-easy
@@ -370,20 +368,24 @@ iptables-persistent iptables-persistent/autosave_v6 boolean true
 EOF
 apt-get install iptables-persistent netfilter-persistent -y
 
-iptables -A INPUT -p icmp -j ACCEPT
-iptables -A INPUT -m state --state RELATED,ESTABLISHED -j ACCEPT
-iptables -A INPUT -p tcp -m state --state NEW -m tcp --dport $SSH_PORT -j ACCEPT
-iptables -A INPUT -p tcp -m tcp --dport 80 -j ACCEPT
-iptables -A INPUT -p tcp -m tcp --dport 443 -j ACCEPT
-iptables -A INPUT -p udp -m udp --dport 51820 -j ACCEPT
-iptables -A INPUT -s $VPS1_IP -p udp -m udp --dport 51830 -j ACCEPT
-iptables -A INPUT -p udp -m udp --dport 51830 -j DROP
-iptables -A INPUT -s $VPS1_IP -p tcp -m tcp --dport 62050 -j ACCEPT
-iptables -A INPUT -s $VPS1_IP -p tcp -m tcp --dport 62051 -j ACCEPT
-iptables -A INPUT -p tcp -m tcp --dport 62050 -j REJECT --reject-with tcp-reset
-iptables -A INPUT -p tcp -m tcp --dport 62051 -j REJECT --reject-with tcp-reset
-iptables -A INPUT -i lo -j ACCEPT
-iptables -A OUTPUT -o lo -j ACCEPT
+iptables_add() {
+  iptables -C "$@" 2>/dev/null || iptables -A "$@"
+}
+
+iptables_add INPUT -p icmp -j ACCEPT
+iptables_add INPUT -m state --state RELATED,ESTABLISHED -j ACCEPT
+iptables_add INPUT -p tcp -m state --state NEW -m tcp --dport $SSH_PORT -j ACCEPT
+iptables_add INPUT -p tcp -m tcp --dport 80 -j ACCEPT
+iptables_add INPUT -p tcp -m tcp --dport 443 -j ACCEPT
+iptables_add INPUT -p udp -m udp --dport 51820 -j ACCEPT
+iptables_add INPUT -s $VPS1_IP -p udp -m udp --dport 51830 -j ACCEPT
+iptables_add INPUT -p udp -m udp --dport 51830 -j DROP
+iptables_add INPUT -s $VPS1_IP -p tcp -m tcp --dport 62050 -j ACCEPT
+iptables_add INPUT -s $VPS1_IP -p tcp -m tcp --dport 62051 -j ACCEPT
+iptables_add INPUT -p tcp -m tcp --dport 62050 -j REJECT --reject-with tcp-reset
+iptables_add INPUT -p tcp -m tcp --dport 62051 -j REJECT --reject-with tcp-reset
+iptables_add INPUT -i lo -j ACCEPT
+iptables_add OUTPUT -o lo -j ACCEPT
 iptables -P INPUT DROP
 netfilter-persistent save
 
@@ -422,7 +424,7 @@ warp_install() {
   apt install gpg -y
   echo "If this fails then warp won't be added to routing and everything will work without it"
   curl -fsSL https://pkg.cloudflareclient.com/pubkey.gpg | gpg --yes --dearmor --output /usr/share/keyrings/cloudflare-warp-archive-keyring.gpg
-  echo "deb [signed-by=/usr/share/keyrings/cloudflare-warp-archive-keyring.gpg] https://pkg.cloudflareclient.com/ $(lsb_release -cs) main" | tee /etc/apt/sources.list.d/cloudflare-client.list
+  echo "deb [signed-by=/usr/share/keyrings/cloudflare-warp-archive-keyring.gpg] https://pkg.cloudflareclient.com/ $(. /etc/os-release && echo $VERSION_CODENAME) main" | tee /etc/apt/sources.list.d/cloudflare-client.list
   apt update
   apt install cloudflare-warp -y
 

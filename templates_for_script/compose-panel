@@ -17,7 +17,7 @@ services:
     network_mode: host
     volumes:
       - ./marzban/xray_config.json:/code/xray_config.json:ro
-      - ./marzban/xray-core:/var/lib/marzban/xray-core:ro
+      - ./marzban/xray-core:/code/xray-core:ro
       - ./marzban_lib:/var/lib/marzban
 
 volumes:

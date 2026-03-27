@@ -3,9 +3,9 @@
 set -euo pipefail
 
 # --add-wg-peer mode: add WG tunnel peer and exit
-if [[ "$1" == "--add-wg-peer" ]]; then
-  WG_PBK="$2"
-  VPS2_IP="$3"
+if [[ "${1:-}" == "--add-wg-peer" ]]; then
+  WG_PBK="${2:-}"
+  VPS2_IP="${3:-}"
   if [[ -z "$WG_PBK" || -z "$VPS2_IP" ]]; then
     echo "Usage: setup-panel.sh --add-wg-peer <VPS2_WG_PUBLIC_KEY> <VPS2_IP>"
     exit 1
@@ -44,7 +44,7 @@ TEMPLATE_URL="https://raw.githubusercontent.com/$GIT_REPO/refs/heads/$GIT_BRANCH
 # Read domain input
 read -ep "Enter your domain:"$'\n' input_domain
 
-export VLESS_DOMAIN=$(echo $input_domain | idn)
+export VLESS_DOMAIN=$(echo "$input_domain" | idn)
 
 SERVER_IPS=($(hostname -I))
 
@@ -145,8 +145,15 @@ wget -qO- "$TEMPLATE_URL/confluence" | envsubst > ./index.html
 chmod 600 ./marzban/xray_config.json ./marzban/.env
 chmod 644 ./angie.conf ./index.html ./docker-compose.yml
 
+# Detect default network interface
+export DEFAULT_IFACE=$(ip route show default | awk '{print $5}' | head -1)
+if [[ -z "$DEFAULT_IFACE" ]]; then
+  echo "Could not detect default network interface"
+  exit 1
+fi
+
 # WireGuard tunnel config
-wget -qO- "$TEMPLATE_URL/wg-tunnel-panel" | envsubst '$WG_TUNNEL_PIK' > /etc/wireguard/wg-tunnel.conf
+wget -qO- "$TEMPLATE_URL/wg-tunnel-panel" | envsubst '$WG_TUNNEL_PIK $DEFAULT_IFACE' > /etc/wireguard/wg-tunnel.conf
 chmod 600 /etc/wireguard/wg-tunnel.conf
 systemctl enable wg-quick@wg-tunnel
 
@@ -205,14 +212,18 @@ iptables-persistent iptables-persistent/autosave_v6 boolean true
 EOF
 apt-get install iptables-persistent netfilter-persistent -y
 
-iptables -A INPUT -p icmp -j ACCEPT
-iptables -A INPUT -m state --state RELATED,ESTABLISHED -j ACCEPT
-iptables -A INPUT -p tcp -m state --state NEW -m tcp --dport $SSH_PORT -j ACCEPT
-iptables -A INPUT -p tcp -m tcp --dport 80 -j ACCEPT
-iptables -A INPUT -p tcp -m tcp --dport 443 -j ACCEPT
-iptables -A INPUT -p udp -m udp --dport 51830 -j ACCEPT
-iptables -A INPUT -i lo -j ACCEPT
-iptables -A OUTPUT -o lo -j ACCEPT
+iptables_add() {
+  iptables -C "$@" 2>/dev/null || iptables -A "$@"
+}
+
+iptables_add INPUT -p icmp -j ACCEPT
+iptables_add INPUT -m state --state RELATED,ESTABLISHED -j ACCEPT
+iptables_add INPUT -p tcp -m state --state NEW -m tcp --dport $SSH_PORT -j ACCEPT
+iptables_add INPUT -p tcp -m tcp --dport 80 -j ACCEPT
+iptables_add INPUT -p tcp -m tcp --dport 443 -j ACCEPT
+iptables_add INPUT -p udp -m udp --dport 51830 -j ACCEPT
+iptables_add INPUT -i lo -j ACCEPT
+iptables_add OUTPUT -o lo -j ACCEPT
 iptables -P INPUT DROP
 netfilter-persistent save
 
