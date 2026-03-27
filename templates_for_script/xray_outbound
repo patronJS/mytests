@@ -1,0 +1,30 @@
+{
+  "tag": "default",
+  "protocol": "vless",
+  "settings": {
+    "vnext": [
+      {
+        "address": "$VLESS_DOMAIN",
+        "port": 443,
+        "users": [
+          {
+            "id": "$XRAY_UUID",
+            "encryption": "none",
+            "flow": "xtls-rprx-vision"
+          }
+        ]
+      }
+    ]
+  },
+  "streamSettings": {
+    "network": "tcp",
+    "security": "reality",
+    "realitySettings": {
+      "serverName": "$VLESS_DOMAIN",
+      "fingerprint": "chrome",
+      "publicKey": "$XRAY_PBK",
+      "shortId": "$XRAY_SID",
+      "spiderX": ""
+    }
+  }
+}

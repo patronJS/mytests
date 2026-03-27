@@ -1,0 +1,21 @@
+{
+    "type": "vless",
+    "server": "$VLESS_DOMAIN",
+    "server_port": 443,
+    "uuid": "$XRAY_UUID",
+    "flow": "xtls-rprx-vision",
+    "tls": {
+        "enabled": true,
+        "insecure": false,
+        "server_name": "$VLESS_DOMAIN",
+        "utls": {
+            "enabled": true,
+            "fingerprint": "chrome"
+        },
+        "reality": {
+            "enabled": true,
+            "public_key": "$XRAY_PBK",
+            "short_id": ""
+        }
+    }
+}

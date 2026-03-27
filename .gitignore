@@ -1,0 +1,5 @@
+gist*.md
+ansible.cfg
+inventory.yml
+playbook.yml
+.mcp.json
