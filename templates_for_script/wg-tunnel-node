@@ -1,0 +1,11 @@
+[Interface]
+PrivateKey = $WG_TUNNEL_PIK
+Address = 10.9.0.2/24
+ListenPort = 51830
+Table = off
+
+[Peer]
+PublicKey = $WG_TUNNEL_PEER_PBK
+Endpoint = $VPS1_IP:51830
+AllowedIPs = 0.0.0.0/0
+PersistentKeepalive = 25

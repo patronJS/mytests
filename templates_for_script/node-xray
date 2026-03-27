@@ -1,0 +1,90 @@
+{
+  "log": {"loglevel": "warning"},
+  "inbounds": [
+    {
+      "tag": "reality-tcp",
+      "listen": "0.0.0.0",
+      "port": 443,
+      "protocol": "vless",
+      "settings": {
+        "clients": [{"id": "$CLIENT_UUID", "flow": "xtls-rprx-vision"}],
+        "decryption": "none",
+        "fallbacks": [{"dest": "@xhttp"}]
+      },
+      "streamSettings": {
+        "network": "tcp",
+        "security": "reality",
+        "realitySettings": {
+          "dest": "127.0.0.1:4123",
+          "xver": 1,
+          "serverNames": ["$VLESS_DOMAIN"],
+          "privateKey": "$XRAY_PIK",
+          "shortIds": ["$SHORT_ID"]
+        }
+      },
+      "sniffing": {
+        "enabled": true,
+        "destOverride": ["http", "tls"],
+        "routeOnly": true
+      }
+    },
+    {
+      "tag": "xhttp-in",
+      "listen": "@xhttp",
+      "protocol": "vless",
+      "settings": {
+        "clients": [{"id": "$CLIENT_UUID"}],
+        "decryption": "none"
+      },
+      "streamSettings": {
+        "network": "xhttp",
+        "xhttpSettings": {"path": "/$CLIENT_XHTTP_PATH"}
+      },
+      "sniffing": {
+        "enabled": true,
+        "destOverride": ["http", "tls"],
+        "routeOnly": true
+      }
+    }
+  ],
+  "outbounds": [
+    {
+      "tag": "chain-vps1",
+      "protocol": "vless",
+      "settings": {
+        "vnext": [{
+          "address": "$PANEL_DOMAIN",
+          "port": 443,
+          "users": [{"id": "$UUID_LINK", "encryption": "none"}]
+        }]
+      },
+      "streamSettings": {
+        "network": "xhttp",
+        "security": "reality",
+        "xhttpSettings": {
+          "path": "/$XHTTP_PATH",
+          "mode": "stream-one"
+        },
+        "realitySettings": {
+          "serverName": "$PANEL_DOMAIN",
+          "fingerprint": "chrome",
+          "publicKey": "$PANEL_PBK",
+          "shortId": "$PANEL_SHORT_ID"
+        }
+      }
+    },
+    {"protocol": "freedom", "tag": "direct"},
+    {"protocol": "blackhole", "tag": "block"}
+  ],
+  "routing": {
+    "rules": [
+      {"protocol": "bittorrent", "outboundTag": "block"},
+      {"inboundTag": ["reality-tcp", "xhttp-in"], "outboundTag": "chain-vps1"}
+    ],
+    "domainStrategy": "IPIfNonMatch"
+  },
+  "dns": {
+    "servers": ["1.1.1.1", "8.8.8.8"],
+    "queryStrategy": "UseIPv4"
+  }
+}

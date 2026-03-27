@@ -1,0 +1,43 @@
+{
+  "log": {"loglevel": "warning"},
+  "inbounds": [{
+    "listen": "0.0.0.0",
+    "port": 443,
+    "protocol": "vless",
+    "settings": {
+      "clients": [{"id": "$UUID_LINK", "encryption": "none"}],
+      "decryption": "none"
+    },
+    "streamSettings": {
+      "network": "xhttp",
+      "security": "reality",
+      "xhttpSettings": {
+        "path": "/$XHTTP_PATH"
+      },
+      "realitySettings": {
+        "dest": "127.0.0.1:4123",
+        "xver": 1,
+        "serverNames": ["$VLESS_DOMAIN"],
+        "privateKey": "$XRAY_PIK",
+        "shortIds": ["$SHORT_ID"]
+      }
+    },
+    "sniffing": {
+      "enabled": true,
+      "destOverride": ["http", "tls"],
+      "routeOnly": true
+    }
+  }],
+  "outbounds": [
+    {"protocol": "freedom", "tag": "direct", "settings": {"domainStrategy": "UseIPv4"}},
+    {"protocol": "blackhole", "tag": "block"}
+  ],
+  "routing": {
+    "rules": [{"protocol": "bittorrent", "outboundTag": "block"}],
+    "domainStrategy": "IPIfNonMatch"
+  },
+  "dns": {
+    "servers": ["1.1.1.1", "8.8.8.8"],
+    "queryStrategy": "UseIPv4"
+  }
+}

@@ -1,0 +1,55 @@
+services:
+  angie:
+    image: docker.angie.software/angie:minimal
+    container_name: angie
+    restart: always
+    network_mode: host
+    volumes:
+      - angie-data:/var/lib/angie
+      - ./angie.conf:/etc/angie/angie.conf:ro
+      - ./index.html:/tmp/index.html:ro
+
+  marzban-node:
+    image: gozargah/marzban-node:latest
+    container_name: marzban-node
+    restart: always
+    network_mode: host
+    environment:
+      - SERVICE_PORT=62050
+      - XRAY_API_PORT=62051
+      - SSL_CLIENT_CERT_FILE=/ssl_client_cert.pem
+      - XRAY_EXECUTABLE_PATH=/var/lib/marzban/xray-core/xray
+    volumes:
+      - ./node/xray_config.json:/code/xray_config.json:ro
+      - ./node/xray-core:/var/lib/marzban/xray-core:ro
+      - ./ssl_client_cert.pem:/ssl_client_cert.pem:ro
+
+  wg-easy:
+    image: ghcr.io/wg-easy/wg-easy:latest
+    container_name: wg-easy
+    restart: always
+    network_mode: host
+    cap_add:
+      - NET_ADMIN
+      - SYS_MODULE
+    sysctls:
+      - net.ipv4.ip_forward=1
+    environment:
+      - WG_HOST=$VLESS_DOMAIN
+      - PASSWORD_HASH=$WG_ADMIN_HASH
+      - WG_PORT=51820
+      - WG_DEFAULT_DNS=1.1.1.1
+      - WG_ALLOWED_IPS=0.0.0.0/0
+      - PORT=51821
+      - WG_POST_UP=ip rule add from 10.8.0.0/24 table 100; ip route add default via 10.9.0.1 dev wg-tunnel table 100
+      - WG_POST_DOWN=ip rule del from 10.8.0.0/24 table 100; ip route del default via 10.9.0.1 dev wg-tunnel table 100
+    volumes:
+      - wg-data:/etc/wireguard
+
+volumes:
+  angie-data:
+    driver: local
+    external: false
+    name: angie-data
+  wg-data:
+    driver: local
