@@ -34,12 +34,19 @@ fi
 
 # Install dependencies
 apt-get update
-apt-get install idn sudo dnsutils wamerican wireguard-tools zip unzip -y
+apt-get install idn sudo dnsutils wamerican wireguard-tools zip unzip python3 wget curl openssl gettext -y
 
 export GIT_BRANCH="main"
 export GIT_REPO="Akiyamov/xray-vps-setup"
 export XRAY_VERSION="v26.3.23"
 TEMPLATE_URL="https://raw.githubusercontent.com/$GIT_REPO/refs/heads/$GIT_BRANCH/templates_for_script"
+
+fetch_template() {
+  local content
+  content=$(wget -qO- "$TEMPLATE_URL/$1") || { echo "Failed to download template: $1"; exit 1; }
+  [ -n "$content" ] || { echo "Template is empty: $1"; exit 1; }
+  echo "$content"
+}
 
 # Read domain input
 read -ep "Enter your domain:"$'\n' input_domain
@@ -140,11 +147,11 @@ unzip -qo /tmp/xray.zip -d /opt/xray-vps-setup/marzban/xray-core
 # Download and envsubst templates
 mkdir -p /opt/xray-vps-setup/marzban
 cd /opt/xray-vps-setup
-wget -qO- "$TEMPLATE_URL/panel-xray" | envsubst > ./marzban/xray_config.json
-wget -qO- "$TEMPLATE_URL/panel-angie" | envsubst '$VLESS_DOMAIN $MARZBAN_PATH $MARZBAN_SUB_PATH' > ./angie.conf
-wget -qO- "$TEMPLATE_URL/compose-panel" | envsubst > ./docker-compose.yml
-wget -qO- "$TEMPLATE_URL/marzban" | envsubst > ./marzban/.env
-wget -qO- "$TEMPLATE_URL/confluence" | envsubst > ./index.html
+fetch_template "panel-xray" | envsubst > ./marzban/xray_config.json
+fetch_template "panel-angie" | envsubst '$VLESS_DOMAIN $MARZBAN_PATH $MARZBAN_SUB_PATH' > ./angie.conf
+fetch_template "compose-panel" | envsubst > ./docker-compose.yml
+fetch_template "marzban" | envsubst > ./marzban/.env
+fetch_template "confluence" | envsubst > ./index.html
 
 # File permissions
 chmod 600 ./marzban/xray_config.json ./marzban/.env
@@ -158,17 +165,24 @@ if [[ -z "$DEFAULT_IFACE" ]]; then
 fi
 
 # WireGuard tunnel config
-wget -qO- "$TEMPLATE_URL/wg-tunnel-panel" | envsubst '$WG_TUNNEL_PIK $DEFAULT_IFACE' > /etc/wireguard/wg-tunnel.conf
+mkdir -p /etc/wireguard
+fetch_template "wg-tunnel-panel" | envsubst '$WG_TUNNEL_PIK $DEFAULT_IFACE' > /etc/wireguard/wg-tunnel.conf
 chmod 600 /etc/wireguard/wg-tunnel.conf
 systemctl enable wg-quick@wg-tunnel
 
 # Start containers
 docker compose -f /opt/xray-vps-setup/docker-compose.yml up -d
 
-# Marzban init
+# Marzban init — wait until API is ready (up to 60s)
 echo "Waiting for Marzban to start..."
-sleep 5
-docker exec marzban marzban-cli admin import-from-env || echo "Warning: admin import failed"
+for i in $(seq 1 12); do
+  sleep 5
+  if docker exec marzban marzban-cli admin import-from-env 2>/dev/null; then
+    echo "Marzban admin imported successfully"
+    break
+  fi
+  echo "  attempt $i/12..."
+done
 
 # Update panel default host
 echo "Updating panel default host with domain $VLESS_DOMAIN..."

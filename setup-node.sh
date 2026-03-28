@@ -10,12 +10,19 @@ fi
 
 # Install dependencies
 apt-get update
-apt-get install idn sudo dnsutils wamerican wireguard-tools zip unzip -y
+apt-get install idn sudo dnsutils wamerican wireguard-tools zip unzip python3 wget curl openssl gettext -y
 
 export GIT_BRANCH="main"
 export GIT_REPO="Akiyamov/xray-vps-setup"
 export XRAY_VERSION="v26.3.23"
 TEMPLATE_URL="https://raw.githubusercontent.com/$GIT_REPO/refs/heads/$GIT_BRANCH/templates_for_script"
+
+fetch_template() {
+  local content
+  content=$(wget -qO- "$TEMPLATE_URL/$1") || { echo "Failed to download template: $1"; exit 1; }
+  [ -n "$content" ] || { echo "Template is empty: $1"; exit 1; }
+  echo "$content"
+}
 
 # Read domain input
 read -ep "Enter your domain:"$'\n' input_domain
@@ -92,8 +99,8 @@ read -ep "Do you want to harden SSH? [y/N] "$'\n' configure_ssh_input
 if [[ ${configure_ssh_input,,} == "y" ]]; then
   read -ep "Enter SSH port. Default 22, can't use ports: 80, 443 and 4123:"$'\n' input_ssh_port
 
-  while [[ "$input_ssh_port" -eq "80" || "$input_ssh_port" -eq "443" || "$input_ssh_port" -eq "4123" ]]; do
-    read -ep "No, ssh can't use $input_ssh_port as port, write again:"$'\n' input_ssh_port
+  while ! [[ "$input_ssh_port" =~ ^[0-9]+$ ]] || [[ "$input_ssh_port" -eq 80 || "$input_ssh_port" -eq 443 || "$input_ssh_port" -eq 4123 ]]; do
+    read -ep "Invalid or reserved port ($input_ssh_port), write again:"$'\n' input_ssh_port
   done
 
   read -ep "Enter SSH public key:"$'\n' input_ssh_pbk
@@ -170,10 +177,10 @@ unzip -qo /tmp/xray.zip -d /opt/xray-vps-setup/node/xray-core
 # Download and envsubst templates
 mkdir -p /opt/xray-vps-setup/node
 cd /opt/xray-vps-setup
-wget -qO- "$TEMPLATE_URL/node-xray" | envsubst > ./node/xray_config.json
-wget -qO- "$TEMPLATE_URL/node-angie" | envsubst '$VLESS_DOMAIN $WG_UI_PATH' > ./angie.conf
-wget -qO- "$TEMPLATE_URL/compose-cascade-node" | envsubst > ./docker-compose.yml
-wget -qO- "$TEMPLATE_URL/confluence" | envsubst > ./index.html
+fetch_template "node-xray" | envsubst > ./node/xray_config.json
+fetch_template "node-angie" | envsubst '$VLESS_DOMAIN $WG_UI_PATH' > ./angie.conf
+fetch_template "compose-cascade-node" | envsubst > ./docker-compose.yml
+fetch_template "confluence" | envsubst > ./index.html
 touch ./ssl_client_cert.pem
 
 # File permissions
@@ -181,7 +188,8 @@ chmod 600 ./node/xray_config.json ./ssl_client_cert.pem
 chmod 644 ./angie.conf ./index.html ./docker-compose.yml
 
 # WireGuard tunnel config
-wget -qO- "$TEMPLATE_URL/wg-tunnel-node" | envsubst '$WG_TUNNEL_PIK $WG_TUNNEL_PEER_PBK $VPS1_IP' > /etc/wireguard/wg-tunnel.conf
+mkdir -p /etc/wireguard
+fetch_template "wg-tunnel-node" | envsubst '$WG_TUNNEL_PIK $WG_TUNNEL_PEER_PBK $VPS1_IP' > /etc/wireguard/wg-tunnel.conf
 chmod 600 /etc/wireguard/wg-tunnel.conf
 systemctl enable --now wg-quick@wg-tunnel
 
@@ -400,7 +408,7 @@ export SSH_USER_PASS=$(tr -dc A-Za-z0-9 </dev/urandom | head -c 13; echo)
 export SSH_PORT=${input_ssh_port:-22}
 
 sshd_edit() {
-  wget -qO- https://raw.githubusercontent.com/$GIT_REPO/refs/heads/$GIT_BRANCH/templates_for_script/00-disable-password | envsubst > /etc/ssh/sshd_config.d/00-disable-password.conf
+  fetch_template "00-disable-password" | envsubst > /etc/ssh/sshd_config.d/00-disable-password.conf
   systemctl daemon-reload
   systemctl restart ssh
 }
@@ -434,7 +442,7 @@ warp_install() {
   apt install cloudflare-warp -y
 
   echo "y" | warp-cli registration new
-  export TRY_WARP=$(echo $?)
+  TRY_WARP=$?
   if [[ $TRY_WARP != 0 ]]; then
     echo "Couldn't connect to WARP"
     exit 0
