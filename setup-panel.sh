@@ -37,7 +37,7 @@ apt-get update
 apt-get install idn sudo dnsutils wamerican wireguard-tools zip unzip python3 wget curl openssl gettext -y
 
 export GIT_BRANCH="main"
-export GIT_REPO="Akiyamov/xray-vps-setup"
+export GIT_REPO="patronJS/mytests"
 export XRAY_VERSION="v26.3.23"
 TEMPLATE_URL="https://raw.githubusercontent.com/$GIT_REPO/refs/heads/$GIT_BRANCH/templates_for_script"
 

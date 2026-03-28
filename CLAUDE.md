@@ -37,12 +37,12 @@ Scripts generate at runtime: x25519 key pairs (PIK/PBK), XRay UUIDs, WireGuard t
 ```bash
 # 1. On VPS1 (Germany):
 tmux
-bash <(wget -qO- https://raw.githubusercontent.com/Akiyamov/xray-vps-setup/refs/heads/main/setup-panel.sh)
+bash <(wget -qO- https://raw.githubusercontent.com/patronJS/mytests/refs/heads/main/setup-panel.sh)
 # Copy the output values
 
 # 2. On VPS2 (Russia):
 tmux
-bash <(wget -qO- https://raw.githubusercontent.com/Akiyamov/xray-vps-setup/refs/heads/main/setup-node.sh)
+bash <(wget -qO- https://raw.githubusercontent.com/patronJS/mytests/refs/heads/main/setup-node.sh)
 # Paste VPS1 values when prompted
 
 # 3. Back on VPS1 — add WG tunnel peer:

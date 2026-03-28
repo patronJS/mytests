@@ -65,7 +65,7 @@ dig +short vps2.example.com   # должен вернуть IP VPS2
 ```bash
 apt-get update && apt-get install tmux -y
 tmux
-bash <(wget -qO- https://raw.githubusercontent.com/Akiyamov/xray-vps-setup/refs/heads/main/setup-panel.sh)
+bash <(wget -qO- https://raw.githubusercontent.com/patronJS/mytests/refs/heads/main/setup-panel.sh)
 ```
 
 Скрипт спросит только **домен VPS1** и всё сделает автоматически:
@@ -99,7 +99,7 @@ bash <(wget -qO- https://raw.githubusercontent.com/Akiyamov/xray-vps-setup/refs/
 ```bash
 apt-get update && apt-get install tmux -y
 tmux
-bash <(wget -qO- https://raw.githubusercontent.com/Akiyamov/xray-vps-setup/refs/heads/main/setup-node.sh)
+bash <(wget -qO- https://raw.githubusercontent.com/patronJS/mytests/refs/heads/main/setup-node.sh)
 ```
 
 Скрипт задаст вопросы — отвечайте, используя данные из вывода шага 2:
