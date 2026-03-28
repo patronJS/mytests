@@ -23,7 +23,7 @@
       "serverName": "$VLESS_DOMAIN",
       "fingerprint": "chrome",
       "publicKey": "$XRAY_PBK",
-      "shortId": "$XRAY_SID",
+      "shortId": "$SHORT_ID",
       "spiderX": ""
     }
   }

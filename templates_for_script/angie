@@ -8,8 +8,8 @@ events {
 }
 
 http {
-    log_format main '[$time_local] $proxy_protocol_addr "$http_referer" "$http_user_agent"';
-    access_log /var/log/angie/access.log main;
+    server_tokens off;
+    access_log off;
 
     map $http_upgrade $connection_upgrade {
         default upgrade;

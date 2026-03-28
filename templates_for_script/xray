@@ -28,10 +28,7 @@
             "$VLESS_DOMAIN"
           ],
           "privateKey": "$XRAY_PIK",
-          "publicKey": "$XRAY_PBK",
-          "shortIds": [
-            ""
-          ]
+          "shortIds": [$SHORT_IDS]
         }
       },
       "sniffing": {

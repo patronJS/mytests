@@ -115,7 +115,12 @@ export XRAY_PIK=$(docker run --rm ghcr.io/xtls/xray-core x25519 | head -n1 | cut
 export XRAY_PBK=$(docker run --rm ghcr.io/xtls/xray-core x25519 -i $XRAY_PIK | tail -2 | head -1 | cut -d' ' -f 2)
 export UUID_LINK=$(docker run --rm ghcr.io/xtls/xray-core uuid)
 export XHTTP_PATH=$(openssl rand -hex 12)
-export SHORT_ID=$(openssl rand -hex 8)
+export SID1=$(openssl rand -hex 2)
+export SID2=$(openssl rand -hex 4)
+export SID3=$(openssl rand -hex 6)
+export SID4=$(openssl rand -hex 8)
+export SHORT_IDS="\"$SID1\",\"$SID2\",\"$SID3\",\"$SID4\""
+export SHORT_ID=$SID4
 export MARZBAN_USER=$(grep -E '^[a-z]{4,6}$' /usr/share/dict/words | shuf -n 1)
 export MARZBAN_PASS=$(tr -dc A-Za-z0-9 </dev/urandom | head -c 13; echo)
 export MARZBAN_PATH=$(openssl rand -hex 8)
@@ -236,7 +241,8 @@ echo " Panel pass: $MARZBAN_PASS"
 echo ""
 echo " === Values for setup-node.sh ==="
 echo " PANEL_PBK:      $XRAY_PBK"
-echo " PANEL_SHORT_ID: $SHORT_ID"
+echo " PANEL_SHORT_ID: $SHORT_ID (recommended for node outbound)"
+echo " All shortIds:   $SID1, $SID2, $SID3, $SID4"
 echo " UUID_LINK:      $UUID_LINK"
 echo " XHTTP_PATH:     $XHTTP_PATH"
 echo " WG_TUNNEL_PBK:  $WG_TUNNEL_PBK"

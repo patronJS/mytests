@@ -152,6 +152,12 @@ if [[ "$INSTALL_MODE" != "node" ]]; then
   export XRAY_PIK=$(docker run --rm ghcr.io/xtls/xray-core x25519 | head -n1 | cut -d' ' -f 2)
   export XRAY_PBK=$(docker run --rm ghcr.io/xtls/xray-core x25519 -i $XRAY_PIK | tail -2 | head -1 | cut -d' ' -f 2)
   export XRAY_UUID=$(docker run --rm ghcr.io/xtls/xray-core uuid)
+  export SID1=$(openssl rand -hex 2)
+  export SID2=$(openssl rand -hex 4)
+  export SID3=$(openssl rand -hex 6)
+  export SID4=$(openssl rand -hex 8)
+  export SHORT_IDS="\"$SID1\",\"$SID2\",\"$SID3\",\"$SID4\""
+  export SHORT_ID=$SID4
 fi
 
 # Install marzban
@@ -535,7 +541,7 @@ Password: $MARZBAN_PASS
     singbox_config=$(wget -qO- "https://raw.githubusercontent.com/$GIT_REPO/refs/heads/$GIT_BRANCH/templates_for_script/sing_box_outbound" | envsubst)
 
     final_msg="Clipboard string format:
-vless://$XRAY_UUID@$VLESS_DOMAIN:443?type=tcp&security=reality&pbk=$XRAY_PBK&fp=chrome&sni=$VLESS_DOMAIN&sid=&spx=%2F&flow=xtls-rprx-vision#Script
+vless://$XRAY_UUID@$VLESS_DOMAIN:443?type=tcp&security=reality&pbk=$XRAY_PBK&fp=chrome&sni=$VLESS_DOMAIN&sid=$SHORT_ID&spx=%2F&flow=xtls-rprx-vision#Script
 
 XRay outbound config:
 $xray_config
@@ -544,7 +550,8 @@ Sing-box outbound config:
 $singbox_config
 
 Plain data:
-PBK: $XRAY_PBK, UUID: $XRAY_UUID
+PBK: $XRAY_PBK, UUID: $XRAY_UUID, SID: $SHORT_ID
+All shortIds: $SID1, $SID2, $SID3, $SID4
     "
   fi
 

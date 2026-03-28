@@ -82,7 +82,7 @@ read -s -ep "Enter panel admin password:"$'\n' PANEL_PASS; export PANEL_PASS; ec
 # Input validation
 [[ "$UUID_LINK" =~ ^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$ ]] || { echo "Invalid UUID_LINK format"; exit 1; }
 [[ ${#PANEL_PBK} -ge 40 ]] || { echo "PANEL_PBK looks too short"; exit 1; }
-[[ "$PANEL_SHORT_ID" =~ ^[0-9a-f]{16}$ ]] || { echo "Invalid PANEL_SHORT_ID format"; exit 1; }
+[[ "$PANEL_SHORT_ID" =~ ^[0-9a-f]{2,16}$ ]] && (( ${#PANEL_SHORT_ID} % 2 == 0 )) || { echo "Invalid PANEL_SHORT_ID: must be 2-16 even-length hex chars"; exit 1; }
 [[ "$VPS1_IP" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "Invalid VPS1_IP format"; exit 1; }
 [[ "$XHTTP_PATH" =~ ^[0-9a-f]{24}$ ]] || { echo "Invalid XHTTP_PATH format"; exit 1; }
 [[ ${#PANEL_WG_PBK} -ge 40 ]] || { echo "PANEL_WG_PBK looks too short"; exit 1; }
@@ -143,7 +143,12 @@ sysctl -p > /dev/null
 # Generate local secrets
 export XRAY_PIK=$(docker run --rm ghcr.io/xtls/xray-core x25519 | head -n1 | cut -d' ' -f 2)
 export XRAY_PBK=$(docker run --rm ghcr.io/xtls/xray-core x25519 -i $XRAY_PIK | tail -2 | head -1 | cut -d' ' -f 2)
-export SHORT_ID=$(openssl rand -hex 8)
+export SID1=$(openssl rand -hex 2)
+export SID2=$(openssl rand -hex 4)
+export SID3=$(openssl rand -hex 6)
+export SID4=$(openssl rand -hex 8)
+export SHORT_IDS="\"$SID1\",\"$SID2\",\"$SID3\",\"$SID4\""
+export SHORT_ID=$SID4
 export CLIENT_UUID=$(docker run --rm ghcr.io/xtls/xray-core uuid)
 export CLIENT_XHTTP_PATH=$(openssl rand -hex 12)
 export WG_TUNNEL_PIK=$(wg genkey)

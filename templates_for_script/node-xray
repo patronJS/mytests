@@ -19,7 +19,7 @@
           "xver": 1,
           "serverNames": ["$VLESS_DOMAIN"],
           "privateKey": "$XRAY_PIK",
-          "shortIds": ["$SHORT_ID"]
+          "shortIds": [$SHORT_IDS]
         }
       },
       "sniffing": {

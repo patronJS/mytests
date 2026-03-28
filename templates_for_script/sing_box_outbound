@@ -15,7 +15,7 @@
         "reality": {
             "enabled": true,
             "public_key": "$XRAY_PBK",
-            "short_id": ""
+            "short_id": "$SHORT_ID"
         }
     }
 }
