@@ -8,6 +8,10 @@ if [ "$EUID" -ne 0 ]
   exit
 fi
 
+# Disable IPv6 early — prevents wget/apt hangs on dual-stack hosts
+sysctl -w net.ipv6.conf.all.disable_ipv6=1 > /dev/null
+sysctl -w net.ipv6.conf.default.disable_ipv6=1 > /dev/null
+
 # Install dependencies
 apt-get update
 apt-get install idn sudo dnsutils wamerican wireguard-tools zip unzip python3 wget curl openssl gettext -y
