@@ -279,7 +279,7 @@ iptables_add INPUT -m state --state RELATED,ESTABLISHED -j ACCEPT
 iptables_add INPUT -p tcp -m state --state NEW -m tcp --dport $SSH_PORT -j ACCEPT
 iptables_add INPUT -p tcp -m tcp --dport 80 -j ACCEPT
 iptables_add INPUT -p tcp -m tcp --dport 443 -j ACCEPT
-iptables_add INPUT -p udp -m udp --dport 51820 -j ACCEPT
+iptables_add INPUT -p udp -m udp --dport 41820 -j ACCEPT
 iptables_add INPUT -i lo -j ACCEPT
 iptables_add OUTPUT -o lo -j ACCEPT
 iptables -P INPUT DROP
