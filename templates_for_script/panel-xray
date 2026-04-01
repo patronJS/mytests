@@ -3,7 +3,7 @@
   "inbounds": [{
     "tag": "VLESS_XHTTP_REALITY",
     "listen": "0.0.0.0",
-    "port": 443,
+    "port": 49321,
     "protocol": "vless",
     "settings": {
       "clients": [{"id": "$UUID_LINK"}],
@@ -13,12 +13,13 @@
       "network": "xhttp",
       "security": "reality",
       "xhttpSettings": {
-        "path": "/$XHTTP_PATH"
+        "path": "/$XHTTP_PATH",
+        "extra": {"xPaddingBytes": "300-2000"}
       },
       "realitySettings": {
-        "dest": "127.0.0.1:4123",
-        "xver": 1,
-        "serverNames": ["$VLESS_DOMAIN"],
+        "dest": "dl.google.com:443",
+        "xver": 0,
+        "serverNames": ["dl.google.com"],
         "privateKey": "$XRAY_PIK",
         "publicKey": "$XRAY_PBK",
         "shortIds": [$SHORT_IDS]

@@ -73,8 +73,8 @@
       "protocol": "vless",
       "settings": {
         "vnext": [{
-          "address": "$VPS1_DOMAIN",
-          "port": 443,
+          "address": "$VPS1_IP",
+          "port": 49321,
           "users": [{"id": "$UUID_LINK", "encryption": "none"}]
         }]
       },
@@ -83,10 +83,11 @@
         "security": "reality",
         "xhttpSettings": {
           "path": "/$XHTTP_PATH",
-          "mode": "stream-one"
+          "mode": "packet-up",
+          "extra": {"xPaddingBytes": "300-2000"}
         },
         "realitySettings": {
-          "serverName": "$VPS1_DOMAIN",
+          "serverName": "dl.google.com",
           "fingerprint": "chrome",
           "publicKey": "$VPS1_PBK",
           "shortId": "$VPS1_SHORT_ID"

@@ -18,7 +18,7 @@ apt-get install idn sudo dnsutils wamerican zip unzip python3 wget curl openssl 
 
 export GIT_BRANCH="main"
 export GIT_REPO="patronJS/mytests"
-export XRAY_VERSION="v26.3.23"
+export XRAY_VERSION="v26.3.27"
 # Pinned versions: yq=v4.52.5, marzban=latest, wg-easy=15, angie=minimal
 TEMPLATE_URL="https://raw.githubusercontent.com/$GIT_REPO/refs/heads/$GIT_BRANCH/templates_for_script"
 
@@ -73,7 +73,6 @@ else
 fi
 
 # Ask VPS1 connection info
-read -ep "Enter VPS1 domain:"$'\n' VPS1_DOMAIN; export VPS1_DOMAIN
 read -ep "Enter VPS1 IP address:"$'\n' VPS1_IP; export VPS1_IP
 read -ep "Enter VPS1 public key (PBK):"$'\n' VPS1_PBK; export VPS1_PBK
 read -ep "Enter VPS1 short ID:"$'\n' VPS1_SHORT_ID; export VPS1_SHORT_ID
@@ -162,7 +161,8 @@ export SHORT_ID=$SID4
 export CLIENT_UUID=$(docker run --rm ghcr.io/xtls/xray-core:${XRAY_VERSION#v} uuid)
 export CLIENT_XHTTP_PATH=$(openssl rand -hex 12)
 export WG_ADMIN_PASS=$(tr -dc A-Za-z0-9 </dev/urandom | head -c 13; echo)
-export WG_ADMIN_HASH=$(docker run --rm ghcr.io/wg-easy/wg-easy:15 wgpw "$WG_ADMIN_PASS")
+WG_ADMIN_HASH_RAW=$(docker run --rm ghcr.io/wg-easy/wg-easy:15 wgpw "$WG_ADMIN_PASS")
+export WG_ADMIN_HASH="${WG_ADMIN_HASH_RAW//\$/\$\$}"
 export WG_UI_PATH=$(openssl rand -hex 8)
 export MARZBAN_USER=$(grep -E '^[a-z]{4,6}$' /usr/share/dict/words | shuf -n 1)
 export MARZBAN_PASS=$(tr -dc A-Za-z0-9 </dev/urandom | head -c 13; echo)
@@ -183,7 +183,7 @@ mkdir -p /opt/xray-vps-setup/node
 cd /opt/xray-vps-setup
 fetch_template "node-xray" | envsubst > ./node/xray_config.json
 fetch_template "node-angie" | envsubst '$VLESS_DOMAIN $WG_UI_PATH $MARZBAN_PATH $MARZBAN_SUB_PATH' > ./angie.conf
-fetch_template "compose-cascade-node" | envsubst > ./docker-compose.yml
+fetch_template "compose-cascade-node" | envsubst '$VLESS_DOMAIN $WG_ADMIN_HASH $WG_UI_PATH' > ./docker-compose.yml
 fetch_template "confluence" | envsubst > ./index.html
 fetch_template "marzban" | envsubst > ./node/.env
 chmod 600 ./node/.env
@@ -191,9 +191,6 @@ chmod 600 ./node/.env
 # File permissions
 chmod 600 ./node/xray_config.json ./node/.env
 chmod 644 ./angie.conf ./index.html ./docker-compose.yml
-
-# DNS fallback — ensure VPS1 domain resolves for chain outbound
-grep -q "$VPS1_DOMAIN" /etc/hosts || echo "$VPS1_IP $VPS1_DOMAIN" >> /etc/hosts
 
 # Start all containers
 docker compose -f /opt/xray-vps-setup/docker-compose.yml up -d

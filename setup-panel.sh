@@ -14,12 +14,12 @@ sysctl -w net.ipv6.conf.default.disable_ipv6=1 > /dev/null
 
 # Install dependencies
 apt-get update
-apt-get install idn sudo dnsutils wamerican zip unzip python3 wget curl openssl gettext -y
+apt-get install sudo wamerican zip unzip python3 wget curl openssl gettext -y
 
 export GIT_BRANCH="main"
 export GIT_REPO="patronJS/mytests"
-export XRAY_VERSION="v26.3.23"
-# Pinned versions: yq=v4.52.5, marzban=latest (no stable tags), angie=minimal
+export XRAY_VERSION="v26.3.27"
+# Pinned versions: yq=v4.52.5, marzban=latest
 TEMPLATE_URL="https://raw.githubusercontent.com/$GIT_REPO/refs/heads/$GIT_BRANCH/templates_for_script"
 
 fetch_template() {
@@ -28,49 +28,6 @@ fetch_template() {
   [ -n "$content" ] || { echo "Template is empty: $1"; exit 1; }
   echo "$content"
 }
-
-# Read domain input
-read -ep "Enter your domain:"$'\n' input_domain
-
-export VLESS_DOMAIN=$(echo "$input_domain" | idn)
-
-SERVER_IPS=($(hostname -I))
-
-RESOLVED_IP=$(dig +short $VLESS_DOMAIN | tail -n1)
-
-if [ -z "$RESOLVED_IP" ]; then
-  echo "Warning: Domain has no DNS record"
-  read -ep "Are you sure? That domain has no DNS record. If you didn't add that you will have to restart xray and angie by yourself [y/N]"$'\n' prompt_response
-  if [[ "$prompt_response" =~ ^([yY])$ ]]; then
-    echo "Ok, proceeding without DNS verification"
-  else
-    echo "Come back later"
-    exit 1
-  fi
-else
-  MATCH_FOUND=false
-  for server_ip in "${SERVER_IPS[@]}"; do
-    if [ "$RESOLVED_IP" == "$server_ip" ]; then
-      MATCH_FOUND=true
-      break
-    fi
-  done
-
-  if [ "$MATCH_FOUND" = true ]; then
-    echo "✓ DNS record points to this server ($RESOLVED_IP)"
-  else
-    echo "Warning: DNS record exists but points to different IP"
-    echo "  Domain resolves to: $RESOLVED_IP"
-    echo "  This server's IPs: ${SERVER_IPS[*]}"
-    read -ep "Continue anyway? [y/N]"$'\n' prompt_response
-    if [[ "$prompt_response" =~ ^([yY])$ ]]; then
-      echo "Ok, proceeding"
-    else
-      echo "Come back later"
-      exit 1
-    fi
-  fi
-fi
 
 # Install Docker
 docker_install() {
@@ -98,7 +55,7 @@ yq_install() {
 
 yq_install
 
-# Check congestion protocol and enable ip_forward
+# Check congestion protocol
 if ! sysctl net.ipv4.tcp_congestion_control | grep -q bbr; then
   echo "net.core.default_qdisc=fq" >> /etc/sysctl.conf
   echo "net.ipv4.tcp_congestion_control=bbr" >> /etc/sysctl.conf
@@ -122,6 +79,8 @@ export MARZBAN_USER=$(grep -E '^[a-z]{4,6}$' /usr/share/dict/words | shuf -n 1)
 export MARZBAN_PASS=$(tr -dc A-Za-z0-9 </dev/urandom | head -c 13; echo)
 export MARZBAN_PATH=$(openssl rand -hex 8)
 export MARZBAN_SUB_PATH=$(openssl rand -hex 8)
+export VLESS_DOMAIN="localhost"
+
 # Download XRay core
 mkdir -p /opt/xray-vps-setup/marzban/xray-core
 if [[ "$ARCH" == "amd64" ]]; then
@@ -135,14 +94,12 @@ unzip -qo /tmp/xray.zip -d /opt/xray-vps-setup/marzban/xray-core
 mkdir -p /opt/xray-vps-setup/marzban
 cd /opt/xray-vps-setup
 fetch_template "panel-xray" | envsubst > ./marzban/xray_config.json
-fetch_template "panel-angie" | envsubst '$VLESS_DOMAIN $MARZBAN_PATH $MARZBAN_SUB_PATH' > ./angie.conf
 fetch_template "compose-panel" | envsubst > ./docker-compose.yml
 fetch_template "marzban" | envsubst > ./marzban/.env
-fetch_template "confluence" | envsubst > ./index.html
 
 # File permissions
 chmod 600 ./marzban/xray_config.json ./marzban/.env
-chmod 644 ./angie.conf ./index.html ./docker-compose.yml
+chmod 644 ./docker-compose.yml
 
 # Start containers
 docker compose -f /opt/xray-vps-setup/docker-compose.yml up -d
@@ -165,43 +122,6 @@ if [[ "$MARZBAN_IMPORTED" != "true" ]]; then
   exit 1
 fi
 
-# Update panel default host
-echo "Updating panel default host with domain $VLESS_DOMAIN..."
-PANEL_TOKEN=$(curl -sf -X POST "https://$VLESS_DOMAIN/api/admin/token" \
-  -H "Content-Type: application/x-www-form-urlencoded" \
-  --data-urlencode "username=$MARZBAN_USER" \
-  --data-urlencode "password=$MARZBAN_PASS" \
-  | python3 -c "import json,sys; print(json.load(sys.stdin)['access_token'])" || echo "")
-if [[ -n "$PANEL_TOKEN" && "$PANEL_TOKEN" != "null" ]]; then
-  PHOSTS_HTTP=$(curl -s -o /tmp/panel_hosts.json -w "%{http_code}" \
-    "https://$VLESS_DOMAIN/api/hosts" \
-    -H "Authorization: Bearer $PANEL_TOKEN" || echo "000")
-  if [[ "$PHOSTS_HTTP" == "200" ]]; then
-    export PANEL_HOST_DOMAIN="$VLESS_DOMAIN"
-    python3 << 'PYEOF' > /tmp/panel_hosts_updated.json
-import json, os
-with open('/tmp/panel_hosts.json') as f:
-    hosts = json.load(f)
-domain = os.environ['PANEL_HOST_DOMAIN']
-for host_list in hosts.values():
-    for host in host_list:
-        host['address'] = domain
-        host['sni'] = domain
-print(json.dumps(hosts))
-PYEOF
-    curl -s -o /dev/null \
-      -X PUT "https://$VLESS_DOMAIN/api/hosts" \
-      -H "Authorization: Bearer $PANEL_TOKEN" \
-      -H "Content-Type: application/json" \
-      -d @/tmp/panel_hosts_updated.json || true
-    echo "Panel host updated."
-  else
-    echo "Warning: could not fetch panel hosts (HTTP $PHOSTS_HTTP) - update address/SNI manually"
-  fi
-else
-  echo "Warning: could not authenticate to panel API - update default host address/SNI to $VLESS_DOMAIN manually"
-fi
-
 # Configure iptables
 export SSH_PORT=$(ss -tlnp | grep sshd | grep -Po '(?<=:)\d+(?= )' | head -n 1)
 SSH_PORT=${SSH_PORT:-22}
@@ -219,27 +139,27 @@ iptables_add() {
 iptables_add INPUT -p icmp -j ACCEPT
 iptables_add INPUT -m state --state RELATED,ESTABLISHED -j ACCEPT
 iptables_add INPUT -p tcp -m state --state NEW -m tcp --dport $SSH_PORT -j ACCEPT
-iptables_add INPUT -p tcp -m tcp --dport 80 -j ACCEPT
-iptables_add INPUT -p tcp -m tcp --dport 443 -j ACCEPT
+iptables_add INPUT -p tcp -m tcp --dport 49321 -j ACCEPT
 iptables_add INPUT -i lo -j ACCEPT
 iptables_add OUTPUT -o lo -j ACCEPT
 iptables -P INPUT DROP
 netfilter-persistent save
 
 # Cleanup temp files
-rm -f /tmp/panel_hosts.json /tmp/panel_hosts_updated.json /tmp/xray.zip
+rm -f /tmp/xray.zip
 
 # Output
 clear
 echo "========================================="
-echo " Panel URL: https://$VLESS_DOMAIN/$MARZBAN_PATH"
+echo " Marzban Panel: http://localhost:8000/$MARZBAN_PATH"
+echo " (access via SSH tunnel: ssh -L 8000:localhost:8000 root@<VPS1_IP>)"
 echo " Panel user: $MARZBAN_USER"
 echo " Panel pass: $MARZBAN_PASS"
 echo ""
 echo " === Values for setup-entry.sh ==="
-echo " VPS1_DOMAIN:    $VLESS_DOMAIN"
-echo " VPS1_PBK:       $XRAY_PBK"
-echo " VPS1_SHORT_ID:  $SHORT_ID"
-echo " UUID_LINK:      $UUID_LINK"
-echo " XHTTP_PATH:     $XHTTP_PATH"
+echo " VPS1_IP:         $(hostname -I | awk '{print $1}')"
+echo " VPS1_PBK:        $XRAY_PBK"
+echo " VPS1_SHORT_ID:   $SHORT_ID"
+echo " UUID_LINK:       $UUID_LINK"
+echo " XHTTP_PATH:      $XHTTP_PATH"
 echo "========================================="
