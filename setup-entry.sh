@@ -161,7 +161,8 @@ export SHORT_ID=$SID4
 export CLIENT_UUID=$(docker run --rm ghcr.io/xtls/xray-core:${XRAY_VERSION#v} uuid)
 export CLIENT_XHTTP_PATH=$(openssl rand -hex 12)
 export WG_ADMIN_PASS=$(tr -dc A-Za-z0-9 </dev/urandom | head -c 13; echo)
-WG_ADMIN_HASH_RAW=$(docker run --rm ghcr.io/wg-easy/wg-easy:15 wgpw "$WG_ADMIN_PASS")
+pip3 install bcrypt -q 2>/dev/null || apt-get install -y python3-bcrypt -q 2>/dev/null
+WG_ADMIN_HASH_RAW=$(python3 -c "import bcrypt; print(bcrypt.hashpw(b'$WG_ADMIN_PASS', bcrypt.gensalt()).decode())")
 export WG_ADMIN_HASH="${WG_ADMIN_HASH_RAW//\$/\$\$}"
 export WG_UI_PATH=$(openssl rand -hex 8)
 export MARZBAN_USER=$(grep -E '^[a-z]{4,6}$' /usr/share/dict/words | shuf -n 1)
