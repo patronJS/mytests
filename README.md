@@ -16,14 +16,17 @@
 ```
 
 Два способа подключения клиента к VPS2:
+
 - **VLESS+XHTTP+REALITY** (:443) — основной, максимальная защита от DPI, трафик выглядит как обычный HTTPS на обоих участках
 - **WireGuard** (:51820) — опционально, через wg-easy с удобным web-интерфейсом. Шифрование есть, но протокол WireGuard детектируется DPI. Можно не использовать
 
 Между VPS2 и VPS1 весь трафик идёт через:
+
 - **XHTTP+REALITY** — для VLESS-клиентов (chain outbound через steal_oneself)
 - **WG-туннель** (:51830) — для WireGuard-клиентов (p2p, policy routing)
 
 Компоненты:
+
 - **VPS1** — Marzban-панель + XRay XHTTP+REALITY inbound + WireGuard-туннель + NAT
 - **VPS2** — Marzban-нода + XRay steal_oneself + chain outbound + wg-easy (опционально)
 
@@ -65,10 +68,13 @@ dig +short vps2.example.com   # должен вернуть IP VPS2
 ```bash
 apt-get update && apt-get install tmux -y
 tmux
+sysctl -w net.ipv6.conf.all.disable_ipv6=1
+sysctl -w net.ipv6.conf.default.disable_ipv6=1
 bash <(wget -qO- https://raw.githubusercontent.com/patronJS/mytests/refs/heads/main/setup-panel.sh)
 ```
 
 Скрипт спросит только **домен VPS1** и всё сделает автоматически:
+
 - Установит Docker, XRay, Angie, Marzban, WireGuard
 - Сгенерирует ключи, пароли, рандомные пути
 - Настроит iptables и запустит стек
@@ -104,18 +110,18 @@ bash <(wget -qO- https://raw.githubusercontent.com/patronJS/mytests/refs/heads/m
 
 Скрипт задаст вопросы — отвечайте, используя данные из вывода шага 2:
 
-| Вопрос | Откуда взять |
-|--------|-------------|
-| Enter your domain | Домен VPS2 |
-| Enter VPS1 panel domain | Домен VPS1 |
-| Enter VPS1 IP address | IP-адрес VPS1 |
-| Enter VPS1 public key (PBK) | `PANEL_PBK` из вывода шага 2 |
-| Enter VPS1 short ID | `PANEL_SHORT_ID` из вывода шага 2 |
-| Enter inter-VPS UUID | `UUID_LINK` из вывода шага 2 |
-| Enter XHTTP path | `XHTTP_PATH` из вывода шага 2 |
-| Enter VPS1 WG tunnel public key | `WG_TUNNEL_PBK` из вывода шага 2 |
-| Enter panel admin username | `Panel user` из вывода шага 2 |
-| Enter panel admin password | `Panel pass` из вывода шага 2 |
+| Вопрос                          | Откуда взять                      |
+| ------------------------------- | --------------------------------- |
+| Enter your domain               | Домен VPS2                        |
+| Enter VPS1 panel domain         | Домен VPS1                        |
+| Enter VPS1 IP address           | IP-адрес VPS1                     |
+| Enter VPS1 public key (PBK)     | `PANEL_PBK` из вывода шага 2      |
+| Enter VPS1 short ID             | `PANEL_SHORT_ID` из вывода шага 2 |
+| Enter inter-VPS UUID            | `UUID_LINK` из вывода шага 2      |
+| Enter XHTTP path                | `XHTTP_PATH` из вывода шага 2     |
+| Enter VPS1 WG tunnel public key | `WG_TUNNEL_PBK` из вывода шага 2  |
+| Enter panel admin username      | `Panel user` из вывода шага 2     |
+| Enter panel admin password      | `Panel pass` из вывода шага 2     |
 
 Далее скрипт предложит опциональные настройки:
 
