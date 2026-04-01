@@ -103,8 +103,14 @@ fi
 # Install yq
 export ARCH=$(dpkg --print-architecture)
 
+YQ_VERSION="v4.52.5"
 yq_install() {
-  wget https://github.com/mikefarah/yq/releases/latest/download/yq_linux_$ARCH -O /usr/bin/yq && chmod +x /usr/bin/yq
+  wget -q "https://github.com/mikefarah/yq/releases/download/$YQ_VERSION/yq_linux_$ARCH" -O /usr/bin/yq
+  wget -qO /tmp/yq_checksums "https://github.com/mikefarah/yq/releases/download/$YQ_VERSION/checksums"
+  YQ_SHA256=$(grep "yq_linux_$ARCH " /tmp/yq_checksums | awk '{print $19}')
+  echo "$YQ_SHA256  /usr/bin/yq" | sha256sum -c - || { echo "yq checksum verification failed"; rm -f /usr/bin/yq; exit 1; }
+  chmod +x /usr/bin/yq
+  rm -f /tmp/yq_checksums
 }
 
 yq_install
@@ -115,6 +121,8 @@ if ! sysctl net.ipv4.tcp_congestion_control | grep -q bbr; then
   echo "net.ipv4.tcp_congestion_control=bbr" >> /etc/sysctl.conf
 fi
 grep -q "net.ipv4.ip_forward" /etc/sysctl.conf || echo "net.ipv4.ip_forward=1" >> /etc/sysctl.conf
+grep -q "net.ipv6.conf.all.disable_ipv6" /etc/sysctl.conf || echo "net.ipv6.conf.all.disable_ipv6=1" >> /etc/sysctl.conf
+grep -q "net.ipv6.conf.default.disable_ipv6" /etc/sysctl.conf || echo "net.ipv6.conf.default.disable_ipv6=1" >> /etc/sysctl.conf
 sysctl -p > /dev/null
 
 # Generate secrets
@@ -175,14 +183,21 @@ docker compose -f /opt/xray-vps-setup/docker-compose.yml up -d
 
 # Marzban init — wait until API is ready (up to 60s)
 echo "Waiting for Marzban to start..."
+MARZBAN_IMPORTED=false
 for i in $(seq 1 12); do
   sleep 5
   if docker exec marzban marzban-cli admin import-from-env 2>/dev/null; then
     echo "Marzban admin imported successfully"
+    MARZBAN_IMPORTED=true
     break
   fi
   echo "  attempt $i/12..."
 done
+if [[ "$MARZBAN_IMPORTED" != "true" ]]; then
+  echo "ERROR: Marzban admin import failed after 12 attempts. Check logs:"
+  docker logs marzban --tail 30
+  exit 1
+fi
 
 # Update panel default host
 echo "Updating panel default host with domain $VLESS_DOMAIN..."
@@ -245,6 +260,9 @@ iptables_add INPUT -i lo -j ACCEPT
 iptables_add OUTPUT -o lo -j ACCEPT
 iptables -P INPUT DROP
 netfilter-persistent save
+
+# Cleanup temp files
+rm -f /tmp/panel_hosts.json /tmp/panel_hosts_updated.json /tmp/xray.zip
 
 # Output
 clear

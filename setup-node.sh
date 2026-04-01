@@ -133,8 +133,14 @@ fi
 # Install yq
 export ARCH=$(dpkg --print-architecture)
 
+YQ_VERSION="v4.52.5"
 yq_install() {
-  wget https://github.com/mikefarah/yq/releases/latest/download/yq_linux_$ARCH -O /usr/bin/yq && chmod +x /usr/bin/yq
+  wget -q "https://github.com/mikefarah/yq/releases/download/$YQ_VERSION/yq_linux_$ARCH" -O /usr/bin/yq
+  wget -qO /tmp/yq_checksums "https://github.com/mikefarah/yq/releases/download/$YQ_VERSION/checksums"
+  YQ_SHA256=$(grep "yq_linux_$ARCH " /tmp/yq_checksums | awk '{print $19}')
+  echo "$YQ_SHA256  /usr/bin/yq" | sha256sum -c - || { echo "yq checksum verification failed"; rm -f /usr/bin/yq; exit 1; }
+  chmod +x /usr/bin/yq
+  rm -f /tmp/yq_checksums
 }
 
 yq_install
@@ -145,6 +151,8 @@ if ! sysctl net.ipv4.tcp_congestion_control | grep -q bbr; then
   echo "net.ipv4.tcp_congestion_control=bbr" >> /etc/sysctl.conf
 fi
 grep -q "net.ipv4.ip_forward" /etc/sysctl.conf || echo "net.ipv4.ip_forward=1" >> /etc/sysctl.conf
+grep -q "net.ipv6.conf.all.disable_ipv6" /etc/sysctl.conf || echo "net.ipv6.conf.all.disable_ipv6=1" >> /etc/sysctl.conf
+grep -q "net.ipv6.conf.default.disable_ipv6" /etc/sysctl.conf || echo "net.ipv6.conf.default.disable_ipv6=1" >> /etc/sysctl.conf
 sysctl -p > /dev/null
 
 # Generate local secrets
@@ -409,6 +417,7 @@ export SSH_PORT=${input_ssh_port:-22}
 
 sshd_edit() {
   fetch_template "00-disable-password" | envsubst > /etc/ssh/sshd_config.d/00-disable-password.conf
+  sshd -t || { echo "ERROR: sshd config test failed — reverting"; rm -f /etc/ssh/sshd_config.d/00-disable-password.conf; exit 1; }
   systemctl daemon-reload
   systemctl restart ssh
 }
@@ -464,6 +473,12 @@ warp_install() {
 if [[ ${configure_warp_input,,} == "y" ]]; then
   warp_install
 fi
+
+# Cleanup temp files
+rm -f /tmp/node_settings.json /tmp/node_response.json /tmp/nodes_list.json \
+  /tmp/xray_config.json /tmp/xray_config_updated.json /tmp/update_servernames.py \
+  /tmp/marzban_inbounds.json /tmp/marzban_hosts.json /tmp/marzban_hosts_updated.json \
+  /tmp/update_hosts.py /tmp/xray.zip
 
 # Output
 clear
