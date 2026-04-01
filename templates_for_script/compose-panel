@@ -16,7 +16,7 @@ services:
     env_file: ./marzban/.env
     network_mode: host
     volumes:
-      - ./marzban/xray_config.json:/code/xray_config.json:ro
+      - ./marzban/xray_config.json:/code/xray_config.json
       - ./marzban/xray-core:/code/xray-core:ro
       - ./marzban_lib:/var/lib/marzban
 
