@@ -12,6 +12,10 @@ fi
 sysctl -w net.ipv6.conf.all.disable_ipv6=1 > /dev/null
 sysctl -w net.ipv6.conf.default.disable_ipv6=1 > /dev/null
 
+# Switch to iptables-legacy (TPROXY module requires legacy, nft backend ignores legacy rules)
+update-alternatives --set iptables /usr/sbin/iptables-legacy 2>/dev/null || true
+update-alternatives --set ip6tables /usr/sbin/ip6tables-legacy 2>/dev/null || true
+
 # Install dependencies
 apt-get update
 apt-get install idn sudo dnsutils wamerican zip unzip python3 wget curl openssl gettext -y
