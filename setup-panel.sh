@@ -104,6 +104,8 @@ docker_install() {
 if ! command -v docker 2>&1 >/dev/null; then
     docker_install
 fi
+# Restart Docker to pick up disabled IPv6
+systemctl restart docker
 
 # Install yq
 export ARCH=$(dpkg --print-architecture)
