@@ -14,12 +14,12 @@ sysctl -w net.ipv6.conf.default.disable_ipv6=1 > /dev/null
 
 # Install dependencies
 apt-get update
-apt-get install idn sudo dnsutils wamerican wireguard-tools zip unzip python3 wget curl openssl gettext -y
+apt-get install idn sudo dnsutils wamerican zip unzip python3 wget curl openssl gettext -y
 
 export GIT_BRANCH="main"
 export GIT_REPO="patronJS/mytests"
 export XRAY_VERSION="v26.3.23"
-# Pinned versions: yq=v4.52.5, marzban-node=v0.5.2, wg-easy=15, angie=minimal
+# Pinned versions: yq=v4.52.5, marzban=latest, wg-easy=15, angie=minimal
 TEMPLATE_URL="https://raw.githubusercontent.com/$GIT_REPO/refs/heads/$GIT_BRANCH/templates_for_script"
 
 fetch_template() {
@@ -73,31 +73,19 @@ else
 fi
 
 # Ask VPS1 connection info
-read -ep "Enter VPS1 panel domain:"$'\n' PANEL_DOMAIN; export PANEL_DOMAIN
+read -ep "Enter VPS1 domain:"$'\n' VPS1_DOMAIN; export VPS1_DOMAIN
 read -ep "Enter VPS1 IP address:"$'\n' VPS1_IP; export VPS1_IP
-read -ep "Enter VPS1 public key (PBK):"$'\n' PANEL_PBK; export PANEL_PBK
-read -ep "Enter VPS1 short ID:"$'\n' PANEL_SHORT_ID; export PANEL_SHORT_ID
+read -ep "Enter VPS1 public key (PBK):"$'\n' VPS1_PBK; export VPS1_PBK
+read -ep "Enter VPS1 short ID:"$'\n' VPS1_SHORT_ID; export VPS1_SHORT_ID
 read -ep "Enter inter-VPS UUID:"$'\n' UUID_LINK; export UUID_LINK
 read -ep "Enter XHTTP path:"$'\n' XHTTP_PATH; export XHTTP_PATH
-read -ep "Enter VPS1 WG tunnel public key:"$'\n' PANEL_WG_PBK; export PANEL_WG_PBK
-
-# VPS2 public IP (for node registration and WG peer instructions)
-DEFAULT_VPS2_IP=$(hostname -I | awk '{print $1}')
-read -ep "Enter this server's public IP [$DEFAULT_VPS2_IP]:"$'\n' VPS2_IP
-VPS2_IP=${VPS2_IP:-$DEFAULT_VPS2_IP}
-export VPS2_IP
-
-# Panel credentials
-read -ep "Enter panel admin username:"$'\n' PANEL_USER; export PANEL_USER
-read -s -ep "Enter panel admin password:"$'\n' PANEL_PASS; export PANEL_PASS; echo
 
 # Input validation
 [[ "$UUID_LINK" =~ ^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$ ]] || { echo "Invalid UUID_LINK format"; exit 1; }
-[[ ${#PANEL_PBK} -ge 40 ]] || { echo "PANEL_PBK looks too short"; exit 1; }
-[[ "$PANEL_SHORT_ID" =~ ^[0-9a-f]{2,16}$ ]] && (( ${#PANEL_SHORT_ID} % 2 == 0 )) || { echo "Invalid PANEL_SHORT_ID: must be 2-16 even-length hex chars"; exit 1; }
+[[ ${#VPS1_PBK} -ge 40 ]] || { echo "VPS1_PBK looks too short"; exit 1; }
+[[ "$VPS1_SHORT_ID" =~ ^[0-9a-f]{2,16}$ ]] && (( ${#VPS1_SHORT_ID} % 2 == 0 )) || { echo "Invalid VPS1_SHORT_ID: must be 2-16 even-length hex chars"; exit 1; }
 [[ "$VPS1_IP" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "Invalid VPS1_IP format"; exit 1; }
 [[ "$XHTTP_PATH" =~ ^[0-9a-f]{24}$ ]] || { echo "Invalid XHTTP_PATH format"; exit 1; }
-[[ ${#PANEL_WG_PBK} -ge 40 ]] || { echo "PANEL_WG_PBK looks too short"; exit 1; }
 
 # Optional config prompts
 read -ep "Do you want to harden SSH? [y/N] "$'\n' configure_ssh_input
@@ -173,12 +161,13 @@ export SHORT_IDS="\"$SID1\",\"$SID2\",\"$SID3\",\"$SID4\""
 export SHORT_ID=$SID4
 export CLIENT_UUID=$(docker run --rm ghcr.io/xtls/xray-core:${XRAY_VERSION#v} uuid)
 export CLIENT_XHTTP_PATH=$(openssl rand -hex 12)
-export WG_TUNNEL_PIK=$(wg genkey)
-export WG_TUNNEL_PBK=$(echo $WG_TUNNEL_PIK | wg pubkey)
-export WG_TUNNEL_PEER_PBK="$PANEL_WG_PBK"
 export WG_ADMIN_PASS=$(tr -dc A-Za-z0-9 </dev/urandom | head -c 13; echo)
 export WG_ADMIN_HASH=$(docker run --rm ghcr.io/wg-easy/wg-easy:15 wgpw "$WG_ADMIN_PASS")
 export WG_UI_PATH=$(openssl rand -hex 8)
+export MARZBAN_USER=$(grep -E '^[a-z]{4,6}$' /usr/share/dict/words | shuf -n 1)
+export MARZBAN_PASS=$(tr -dc A-Za-z0-9 </dev/urandom | head -c 13; echo)
+export MARZBAN_PATH=$(openssl rand -hex 8)
+export MARZBAN_SUB_PATH=$(openssl rand -hex 8)
 
 # Download XRay core
 mkdir -p /opt/xray-vps-setup/node/xray-core
@@ -193,193 +182,76 @@ unzip -qo /tmp/xray.zip -d /opt/xray-vps-setup/node/xray-core
 mkdir -p /opt/xray-vps-setup/node
 cd /opt/xray-vps-setup
 fetch_template "node-xray" | envsubst > ./node/xray_config.json
-fetch_template "node-angie" | envsubst '$VLESS_DOMAIN $WG_UI_PATH' > ./angie.conf
+fetch_template "node-angie" | envsubst '$VLESS_DOMAIN $WG_UI_PATH $MARZBAN_PATH $MARZBAN_SUB_PATH' > ./angie.conf
 fetch_template "compose-cascade-node" | envsubst > ./docker-compose.yml
 fetch_template "confluence" | envsubst > ./index.html
-touch ./ssl_client_cert.pem
+fetch_template "marzban" | envsubst > ./node/.env
+chmod 600 ./node/.env
 
 # File permissions
-chmod 600 ./node/xray_config.json ./ssl_client_cert.pem
+chmod 600 ./node/xray_config.json ./node/.env
 chmod 644 ./angie.conf ./index.html ./docker-compose.yml
 
-# WireGuard tunnel config
-mkdir -p /etc/wireguard
-fetch_template "wg-tunnel-node" | envsubst '$WG_TUNNEL_PIK $WG_TUNNEL_PEER_PBK $VPS1_IP' > /etc/wireguard/wg-tunnel.conf
-chmod 600 /etc/wireguard/wg-tunnel.conf
-systemctl enable --now wg-quick@wg-tunnel
+# DNS fallback — ensure VPS1 domain resolves for chain outbound
+grep -q "$VPS1_DOMAIN" /etc/hosts || echo "$VPS1_IP $VPS1_DOMAIN" >> /etc/hosts
 
-# DNS fallback — ensure panel domain resolves even without public DNS propagation
-grep -q "$PANEL_DOMAIN" /etc/hosts || echo "$VPS1_IP $PANEL_DOMAIN" >> /etc/hosts
+# Start all containers
+docker compose -f /opt/xray-vps-setup/docker-compose.yml up -d
 
-# Start angie + wg-easy only (marzban-node needs cert from panel first)
-docker compose -f /opt/xray-vps-setup/docker-compose.yml up -d angie wg-easy
-
-# Panel API setup — authenticate, fetch cert, register node, update config
-node_api_setup() {
-  echo "Connecting to panel at https://$PANEL_DOMAIN..."
-  TOKEN=$(curl -sf -X POST "https://$PANEL_DOMAIN/api/admin/token" \
-    -H "Content-Type: application/x-www-form-urlencoded" \
-    --data-urlencode "username=$PANEL_USER" \
-    --data-urlencode "password=$PANEL_PASS" \
-    | yq '.access_token')
-
-  if [[ -z "$TOKEN" || "$TOKEN" == "null" ]]; then
-    echo "Failed to authenticate with panel. Check credentials and panel availability."
-    exit 1
+# Marzban init — wait until API is ready (up to 60s)
+echo "Waiting for Marzban to start..."
+MARZBAN_IMPORTED=false
+for i in $(seq 1 12); do
+  sleep 5
+  if docker exec marzban marzban-cli admin import-from-env 2>/dev/null; then
+    echo "Marzban admin imported successfully"
+    MARZBAN_IMPORTED=true
+    break
   fi
+  echo "  attempt $i/12..."
+done
+if [[ "$MARZBAN_IMPORTED" != "true" ]]; then
+  echo "ERROR: Marzban admin import failed after 12 attempts. Check logs:"
+  docker logs marzban --tail 30
+  exit 1
+fi
 
-  echo "Fetching SSL client certificate from panel..."
-  CERT_HTTP=$(curl -s -o /tmp/node_settings.json -w "%{http_code}" \
-    "https://$PANEL_DOMAIN/api/node/settings" \
-    -H "Authorization: Bearer $TOKEN" || echo "000")
-  if [[ "$CERT_HTTP" != "200" ]]; then
-    echo "Failed to fetch node settings (HTTP $CERT_HTTP):"
-    cat /tmp/node_settings.json
-    exit 1
-  fi
-  python3 -c "import json,sys; print(json.load(open('/tmp/node_settings.json'))['certificate'], end='')" \
-    > /opt/xray-vps-setup/ssl_client_cert.pem
-
-  [ -s /opt/xray-vps-setup/ssl_client_cert.pem ] || { echo "Failed to fetch cert — file is empty"; exit 1; }
-
-  NODE_IP="$VPS2_IP"
-  NODE_NAME=$(hostname)
-
-  echo "Creating node '$NODE_NAME' ($NODE_IP) on panel..."
-  NODE_HTTP=$(curl -s -o /tmp/node_response.json -w "%{http_code}" \
-    -X POST "https://$PANEL_DOMAIN/api/node" \
-    -H "Authorization: Bearer $TOKEN" \
-    -H "Content-Type: application/json" \
-    -d "{\"name\":\"$NODE_NAME\",\"address\":\"$NODE_IP\",\"port\":62050,\"api_port\":62051,\"add_as_new_host\":false}" || echo "000")
-  if [[ "$NODE_HTTP" == "200" ]]; then
-    NODE_ID=$(cat /tmp/node_response.json | yq '.id')
-    echo "Node created with ID: $NODE_ID"
-  elif [[ "$NODE_HTTP" == "409" ]]; then
-    echo "Node already exists on panel, reusing..."
-    NODES_HTTP=$(curl -s -o /tmp/nodes_list.json -w "%{http_code}" \
-      "https://$PANEL_DOMAIN/api/nodes" \
-      -H "Authorization: Bearer $TOKEN" || echo "000")
-    if [[ "$NODES_HTTP" != "200" ]]; then
-      echo "Failed to fetch nodes list (HTTP $NODES_HTTP):"
-      cat /tmp/nodes_list.json
-      exit 1
-    fi
-    NODE_ID=$(python3 -c "import json,sys; nodes=json.load(open('/tmp/nodes_list.json')); print(next(str(n['id']) for n in nodes if n['address']=='$NODE_IP'))")
-    echo "Existing node ID: $NODE_ID"
-  else
-    echo "Failed to create node (HTTP $NODE_HTTP):"
-    cat /tmp/node_response.json
-    exit 1
-  fi
-
-  echo "Updating xray config serverNames with node domain..."
-  CONFIG_HTTP=$(curl -s -o /tmp/xray_config.json -w "%{http_code}" \
-    "https://$PANEL_DOMAIN/api/core/config" \
-    -H "Authorization: Bearer $TOKEN" || echo "000")
-  if [[ "$CONFIG_HTTP" != "200" ]]; then
-    echo "Failed to fetch xray config (HTTP $CONFIG_HTTP):"
-    cat /tmp/xray_config.json
-    exit 1
-  fi
-
-  export NODE_DOMAIN="$VLESS_DOMAIN"
-  cat > /tmp/update_servernames.py << 'PYEOF'
+# Update panel default host
+echo "Updating panel host with domain $VLESS_DOMAIN..."
+PANEL_TOKEN=$(curl -sf -X POST "https://$VLESS_DOMAIN/api/admin/token" \
+  -H "Content-Type: application/x-www-form-urlencoded" \
+  --data-urlencode "username=$MARZBAN_USER" \
+  --data-urlencode "password=$MARZBAN_PASS" \
+  | python3 -c "import json,sys; print(json.load(sys.stdin)['access_token'])" || echo "")
+if [[ -n "$PANEL_TOKEN" && "$PANEL_TOKEN" != "null" ]]; then
+  PHOSTS_HTTP=$(curl -s -o /tmp/panel_hosts.json -w "%{http_code}" \
+    "https://$VLESS_DOMAIN/api/hosts" \
+    -H "Authorization: Bearer $PANEL_TOKEN" || echo "000")
+  if [[ "$PHOSTS_HTTP" == "200" ]]; then
+    export PANEL_HOST_DOMAIN="$VLESS_DOMAIN"
+    python3 << 'PYEOF' > /tmp/panel_hosts_updated.json
 import json, os
-with open('/tmp/xray_config.json') as f:
-    config = json.load(f)
-node_domain = os.environ['NODE_DOMAIN']
-for inbound in config.get('inbounds', []):
-    stream = inbound.get('streamSettings', {})
-    reality = stream.get('realitySettings', {})
-    if 'serverNames' in reality and node_domain not in reality['serverNames']:
-        reality['serverNames'].append(node_domain)
-print(json.dumps(config))
-PYEOF
-  python3 /tmp/update_servernames.py > /tmp/xray_config_updated.json \
-    || { echo "Failed to process xray config JSON"; exit 1; }
-  curl -s -o /dev/null \
-    -X PUT "https://$PANEL_DOMAIN/api/core/config" \
-    -H "Authorization: Bearer $TOKEN" \
-    -H "Content-Type: application/json" \
-    -d @/tmp/xray_config_updated.json || true
-  echo "serverNames updated."
-
-  echo "Fetching inbounds and current hosts..."
-  INBOUNDS_HTTP=$(curl -s -o /tmp/marzban_inbounds.json -w "%{http_code}" \
-    "https://$PANEL_DOMAIN/api/inbounds" \
-    -H "Authorization: Bearer $TOKEN" || echo "000")
-  if [[ "$INBOUNDS_HTTP" != "200" ]]; then
-    echo "Failed to fetch inbounds (HTTP $INBOUNDS_HTTP):"
-    cat /tmp/marzban_inbounds.json
-    exit 1
-  fi
-  HOSTS_HTTP=$(curl -s -o /tmp/marzban_hosts.json -w "%{http_code}" \
-    "https://$PANEL_DOMAIN/api/hosts" \
-    -H "Authorization: Bearer $TOKEN" || echo "000")
-  if [[ "$HOSTS_HTTP" != "200" ]]; then
-    echo "Failed to fetch hosts (HTTP $HOSTS_HTTP):"
-    cat /tmp/marzban_hosts.json
-    exit 1
-  fi
-
-  export HOST_NODE_NAME="$NODE_NAME"
-  export HOST_PANEL_USER="$PANEL_USER"
-  cat > /tmp/update_hosts.py << 'PYEOF'
-import json, os
-with open('/tmp/marzban_hosts.json') as f:
+with open('/tmp/panel_hosts.json') as f:
     hosts = json.load(f)
-with open('/tmp/marzban_inbounds.json') as f:
-    inbounds = json.load(f)
-node_domain = os.environ['NODE_DOMAIN']
-node_name = os.environ['HOST_NODE_NAME']
-panel_user = os.environ['HOST_PANEL_USER']
-inbound_info = {}
-for protocol, inbound_list in inbounds.items():
-    for inbound in inbound_list:
-        tag = inbound.get('tag', '')
-        network = inbound.get('network', 'tcp')
-        inbound_info[tag] = {'protocol': protocol, 'network': network}
-for inbound_tag, host_list in hosts.items():
-    info = inbound_info.get(inbound_tag, {})
-    protocol = info.get('protocol', inbound_tag)
-    transport = info.get('network', 'tcp')
-    remark = f'{node_name} ({panel_user}) [{protocol} - {transport}]'
-    host_list.append({
-        'remark': remark,
-        'address': node_domain,
-        'port': None,
-        'sni': node_domain,
-        'host': None,
-        'path': None,
-        'security': 'inbound_default',
-        'alpn': '',
-        'fingerprint': 'chrome',
-        'allowinsecure': None,
-        'is_disabled': None,
-        'mux_enable': None,
-        'fragment_setting': None,
-        'noise_setting': None,
-        'random_user_agent': None,
-        'use_sni_as_host': None,
-    })
+domain = os.environ['PANEL_HOST_DOMAIN']
+for host_list in hosts.values():
+    for host in host_list:
+        host['address'] = domain
+        host['sni'] = domain
 print(json.dumps(hosts))
 PYEOF
-  python3 /tmp/update_hosts.py > /tmp/marzban_hosts_updated.json \
-    || { echo "Failed to process hosts JSON"; exit 1; }
-  curl -s -o /dev/null \
-    -X PUT "https://$PANEL_DOMAIN/api/hosts" \
-    -H "Authorization: Bearer $TOKEN" \
-    -H "Content-Type: application/json" \
-    -d @/tmp/marzban_hosts_updated.json || true
-  echo "Panel hosts updated."
-
-  echo "Panel configuration complete!"
-}
-
-node_api_setup
-
-# Start marzban-node (cert is now in place)
-docker compose -f /opt/xray-vps-setup/docker-compose.yml up -d marzban-node
+    curl -s -o /dev/null \
+      -X PUT "https://$VLESS_DOMAIN/api/hosts" \
+      -H "Authorization: Bearer $PANEL_TOKEN" \
+      -H "Content-Type: application/json" \
+      -d @/tmp/panel_hosts_updated.json || true
+    echo "Panel host updated."
+  else
+    echo "Warning: could not fetch panel hosts (HTTP $PHOSTS_HTTP) - update address/SNI manually"
+  fi
+else
+  echo "Warning: could not authenticate to panel API - update default host address/SNI to $VLESS_DOMAIN manually"
+fi
 
 # Configure iptables
 # Use the user-supplied SSH port if hardening was requested, otherwise detect current
@@ -406,12 +278,6 @@ iptables_add INPUT -p tcp -m state --state NEW -m tcp --dport $SSH_PORT -j ACCEP
 iptables_add INPUT -p tcp -m tcp --dport 80 -j ACCEPT
 iptables_add INPUT -p tcp -m tcp --dport 443 -j ACCEPT
 iptables_add INPUT -p udp -m udp --dport 51820 -j ACCEPT
-iptables_add INPUT -s $VPS1_IP -p udp -m udp --dport 51830 -j ACCEPT
-iptables_add INPUT -p udp -m udp --dport 51830 -j DROP
-iptables_add INPUT -s $VPS1_IP -p tcp -m tcp --dport 62050 -j ACCEPT
-iptables_add INPUT -s $VPS1_IP -p tcp -m tcp --dport 62051 -j ACCEPT
-iptables_add INPUT -p tcp -m tcp --dport 62050 -j REJECT --reject-with tcp-reset
-iptables_add INPUT -p tcp -m tcp --dport 62051 -j REJECT --reject-with tcp-reset
 iptables_add INPUT -i lo -j ACCEPT
 iptables_add OUTPUT -o lo -j ACCEPT
 iptables -P INPUT DROP
@@ -482,30 +348,23 @@ if [[ ${configure_warp_input,,} == "y" ]]; then
 fi
 
 # Cleanup temp files
-rm -f /tmp/node_settings.json /tmp/node_response.json /tmp/nodes_list.json \
-  /tmp/xray_config.json /tmp/xray_config_updated.json /tmp/update_servernames.py \
-  /tmp/marzban_inbounds.json /tmp/marzban_hosts.json /tmp/marzban_hosts_updated.json \
-  /tmp/update_hosts.py /tmp/xray.zip
+rm -f /tmp/panel_hosts.json /tmp/panel_hosts_updated.json /tmp/xray.zip
 
 # Output
 clear
 echo "========================================="
-echo " VLESS+XHTTP+REALITY (primary):"
-echo " vless://$CLIENT_UUID@$VLESS_DOMAIN:443?type=xhttp&security=reality&pbk=$XRAY_PBK&fp=chrome&sni=$VLESS_DOMAIN&sid=$SHORT_ID&path=%2F$CLIENT_XHTTP_PATH#XHTTP"
-echo ""
-echo " VLESS+REALITY TCP (fallback):"
-echo " vless://$CLIENT_UUID@$VLESS_DOMAIN:443?type=tcp&security=reality&pbk=$XRAY_PBK&fp=chrome&sni=$VLESS_DOMAIN&sid=$SHORT_ID&flow=xtls-rprx-vision#TCP"
+echo " VPS2 Marzban Panel: https://$VLESS_DOMAIN/$MARZBAN_PATH"
+echo " Panel user: $MARZBAN_USER"
+echo " Panel pass: $MARZBAN_PASS"
 echo ""
 echo " WireGuard UI: https://$VLESS_DOMAIN/$WG_UI_PATH/"
 echo " WG admin password: $WG_ADMIN_PASS"
 echo ""
-echo " === Run on VPS1 ==="
-echo " setup-panel.sh --add-wg-peer $WG_TUNNEL_PBK $VPS2_IP"
-echo ""
-echo " === Verify ==="
-echo " On VPS1: ping 10.9.0.2"
-echo " On VPS2: ping 10.9.0.1"
-echo " From client: connect and check IP at ipinfo.io"
+echo " === Next steps ==="
+echo " 1. Open Marzban panel and create users"
+echo " 2. Use VLESS links from panel to connect clients"
+echo " 3. Use WireGuard UI to create WG configs"
+echo " 4. Check IP at ipinfo.io — should show VPS1 (Germany)"
 echo "========================================="
 if [[ ${configure_ssh_input,,} == "y" ]]; then
   echo " SSH user: $SSH_USER, SSH password: $SSH_USER_PASS, SSH port: $SSH_PORT"

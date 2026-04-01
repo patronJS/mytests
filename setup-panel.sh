@@ -2,30 +2,6 @@
 
 set -euo pipefail
 
-# --add-wg-peer mode: add WG tunnel peer and exit
-if [[ "${1:-}" == "--add-wg-peer" ]]; then
-  WG_PBK="${2:-}"
-  VPS2_IP="${3:-}"
-  if [[ -z "$WG_PBK" || -z "$VPS2_IP" ]]; then
-    echo "Usage: setup-panel.sh --add-wg-peer <VPS2_WG_PUBLIC_KEY> <VPS2_IP>"
-    exit 1
-  fi
-  # Remove commented placeholder AND any existing [Peer] section (idempotent)
-  sed -i '/^# \[Peer\]/,/^# Endpoint/d' /etc/wireguard/wg-tunnel.conf
-  sed -i '/^\[Peer\]/,/^$/d' /etc/wireguard/wg-tunnel.conf
-  cat >> /etc/wireguard/wg-tunnel.conf << EOF
-
-[Peer]
-PublicKey = $WG_PBK
-AllowedIPs = 10.8.0.0/24, 10.9.0.2/32
-Endpoint = $VPS2_IP:51830
-EOF
-  systemctl restart wg-quick@wg-tunnel
-  echo "WG tunnel peer added. Testing connectivity..."
-  ping -c 3 10.9.0.2 || echo "Warning: ping failed — VPS2 tunnel may not be up yet"
-  exit 0
-fi
-
 # Check if script started as root
 if [ "$EUID" -ne 0 ]
   then echo "Please run as root"
@@ -38,7 +14,7 @@ sysctl -w net.ipv6.conf.default.disable_ipv6=1 > /dev/null
 
 # Install dependencies
 apt-get update
-apt-get install idn sudo dnsutils wamerican wireguard-tools zip unzip python3 wget curl openssl gettext -y
+apt-get install idn sudo dnsutils wamerican zip unzip python3 wget curl openssl gettext -y
 
 export GIT_BRANCH="main"
 export GIT_REPO="patronJS/mytests"
@@ -127,7 +103,6 @@ if ! sysctl net.ipv4.tcp_congestion_control | grep -q bbr; then
   echo "net.core.default_qdisc=fq" >> /etc/sysctl.conf
   echo "net.ipv4.tcp_congestion_control=bbr" >> /etc/sysctl.conf
 fi
-grep -q "net.ipv4.ip_forward" /etc/sysctl.conf || echo "net.ipv4.ip_forward=1" >> /etc/sysctl.conf
 grep -q "net.ipv6.conf.all.disable_ipv6" /etc/sysctl.conf || echo "net.ipv6.conf.all.disable_ipv6=1" >> /etc/sysctl.conf
 grep -q "net.ipv6.conf.default.disable_ipv6" /etc/sysctl.conf || echo "net.ipv6.conf.default.disable_ipv6=1" >> /etc/sysctl.conf
 sysctl -p > /dev/null
@@ -147,9 +122,6 @@ export MARZBAN_USER=$(grep -E '^[a-z]{4,6}$' /usr/share/dict/words | shuf -n 1)
 export MARZBAN_PASS=$(tr -dc A-Za-z0-9 </dev/urandom | head -c 13; echo)
 export MARZBAN_PATH=$(openssl rand -hex 8)
 export MARZBAN_SUB_PATH=$(openssl rand -hex 8)
-export WG_TUNNEL_PIK=$(wg genkey)
-export WG_TUNNEL_PBK=$(echo $WG_TUNNEL_PIK | wg pubkey)
-
 # Download XRay core
 mkdir -p /opt/xray-vps-setup/marzban/xray-core
 if [[ "$ARCH" == "amd64" ]]; then
@@ -171,19 +143,6 @@ fetch_template "confluence" | envsubst > ./index.html
 # File permissions
 chmod 600 ./marzban/xray_config.json ./marzban/.env
 chmod 644 ./angie.conf ./index.html ./docker-compose.yml
-
-# Detect default network interface
-export DEFAULT_IFACE=$(ip route show default | awk '{print $5}' | head -1)
-if [[ -z "$DEFAULT_IFACE" ]]; then
-  echo "Could not detect default network interface"
-  exit 1
-fi
-
-# WireGuard tunnel config
-mkdir -p /etc/wireguard
-fetch_template "wg-tunnel-panel" | envsubst '$WG_TUNNEL_PIK $DEFAULT_IFACE' > /etc/wireguard/wg-tunnel.conf
-chmod 600 /etc/wireguard/wg-tunnel.conf
-systemctl enable wg-quick@wg-tunnel
 
 # Start containers
 docker compose -f /opt/xray-vps-setup/docker-compose.yml up -d
@@ -262,7 +221,6 @@ iptables_add INPUT -m state --state RELATED,ESTABLISHED -j ACCEPT
 iptables_add INPUT -p tcp -m state --state NEW -m tcp --dport $SSH_PORT -j ACCEPT
 iptables_add INPUT -p tcp -m tcp --dport 80 -j ACCEPT
 iptables_add INPUT -p tcp -m tcp --dport 443 -j ACCEPT
-iptables_add INPUT -p udp -m udp --dport 51830 -j ACCEPT
 iptables_add INPUT -i lo -j ACCEPT
 iptables_add OUTPUT -o lo -j ACCEPT
 iptables -P INPUT DROP
@@ -278,14 +236,10 @@ echo " Panel URL: https://$VLESS_DOMAIN/$MARZBAN_PATH"
 echo " Panel user: $MARZBAN_USER"
 echo " Panel pass: $MARZBAN_PASS"
 echo ""
-echo " === Values for setup-node.sh ==="
-echo " PANEL_PBK:      $XRAY_PBK"
-echo " PANEL_SHORT_ID: $SHORT_ID (recommended for node outbound)"
-echo " All shortIds:   $SID1, $SID2, $SID3, $SID4"
+echo " === Values for setup-entry.sh ==="
+echo " VPS1_DOMAIN:    $VLESS_DOMAIN"
+echo " VPS1_PBK:       $XRAY_PBK"
+echo " VPS1_SHORT_ID:  $SHORT_ID"
 echo " UUID_LINK:      $UUID_LINK"
 echo " XHTTP_PATH:     $XHTTP_PATH"
-echo " WG_TUNNEL_PBK:  $WG_TUNNEL_PBK"
-echo ""
-echo " After setup-node.sh completes, run:"
-echo " setup-panel.sh --add-wg-peer <VPS2_WG_PBK> <VPS2_IP>"
 echo "========================================="
