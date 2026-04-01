@@ -114,14 +114,14 @@ bash <(wget -qO- https://raw.githubusercontent.com/patronJS/mytests/refs/heads/m
 
 Скрипт задаст вопросы — отвечайте, используя данные из вывода шага 2:
 
-| Вопрос                          | Откуда взять                       |
-| ------------------------------- | ---------------------------------- |
-| Enter your domain               | Домен VPS2                         |
-| Enter VPS1 IP address           | `VPS1_IP` из вывода шага 2         |
-| Enter VPS1 public key (PBK)     | `VPS1_PBK` из вывода шага 2        |
-| Enter VPS1 short ID             | `VPS1_SHORT_ID` из вывода шага 2   |
-| Enter inter-VPS UUID            | `UUID_LINK` из вывода шага 2       |
-| Enter XHTTP path                | `XHTTP_PATH` из вывода шага 2      |
+| Вопрос                      | Откуда взять                     |
+| --------------------------- | -------------------------------- |
+| Enter your domain           | Домен VPS2                       |
+| Enter VPS1 IP address       | `VPS1_IP` из вывода шага 2       |
+| Enter VPS1 public key (PBK) | `VPS1_PBK` из вывода шага 2      |
+| Enter VPS1 short ID         | `VPS1_SHORT_ID` из вывода шага 2 |
+| Enter inter-VPS UUID        | `UUID_LINK` из вывода шага 2     |
+| Enter XHTTP path            | `XHTTP_PATH` из вывода шага 2    |
 
 Далее скрипт предложит опциональные настройки:
 
@@ -185,7 +185,3 @@ docker compose -f /opt/xray-vps-setup/docker-compose.yml logs -f
 - VPS1 не имеет домена — REALITY крадёт `dl.google.com`; Angie и сертификаты не нужны
 - WG-клиенты маршрутизируются через TPROXY → XRay chain → VPS1; NAT на стороне VPS1
 - IPv6 необходимо отключить до запуска скриптов
-
-## Связь
-
-Issues, PR или мой [тг](https://t.me/Akiyamov).
