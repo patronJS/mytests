@@ -6,7 +6,7 @@
     "port": 443,
     "protocol": "vless",
     "settings": {
-      "clients": [{"id": "$UUID_LINK", "encryption": "none"}],
+      "clients": [{"id": "$UUID_LINK"}],
       "decryption": "none"
     },
     "streamSettings": {

@@ -43,6 +43,7 @@ apt-get install idn sudo dnsutils wamerican wireguard-tools zip unzip python3 wg
 export GIT_BRANCH="main"
 export GIT_REPO="patronJS/mytests"
 export XRAY_VERSION="v26.3.23"
+# Pinned versions: yq=v4.52.5, marzban=latest (no stable tags), angie=minimal
 TEMPLATE_URL="https://raw.githubusercontent.com/$GIT_REPO/refs/heads/$GIT_BRANCH/templates_for_script"
 
 fetch_template() {
@@ -130,9 +131,9 @@ grep -q "net.ipv6.conf.default.disable_ipv6" /etc/sysctl.conf || echo "net.ipv6.
 sysctl -p > /dev/null
 
 # Generate secrets
-export XRAY_PIK=$(docker run --rm ghcr.io/xtls/xray-core x25519 | head -n1 | cut -d' ' -f 2)
-export XRAY_PBK=$(docker run --rm ghcr.io/xtls/xray-core x25519 -i $XRAY_PIK | tail -2 | head -1 | cut -d' ' -f 2)
-export UUID_LINK=$(docker run --rm ghcr.io/xtls/xray-core uuid)
+export XRAY_PIK=$(docker run --rm ghcr.io/xtls/xray-core:${XRAY_VERSION#v} x25519 | grep 'PrivateKey' | awk '{print $NF}')
+export XRAY_PBK=$(docker run --rm ghcr.io/xtls/xray-core:${XRAY_VERSION#v} x25519 -i "$XRAY_PIK" | grep 'PublicKey' | awk '{print $NF}')
+export UUID_LINK=$(docker run --rm ghcr.io/xtls/xray-core:${XRAY_VERSION#v} uuid)
 export XHTTP_PATH=$(openssl rand -hex 12)
 export SID1=$(openssl rand -hex 2)
 export SID2=$(openssl rand -hex 4)

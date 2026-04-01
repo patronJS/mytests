@@ -10,7 +10,7 @@ services:
       - ./index.html:/tmp/index.html:ro
 
   marzban-node:
-    image: gozargah/marzban-node:latest
+    image: gozargah/marzban-node:v0.5.2
     container_name: marzban-node
     restart: always
     network_mode: host
@@ -25,7 +25,7 @@ services:
       - ./ssl_client_cert.pem:/ssl_client_cert.pem:ro
 
   wg-easy:
-    image: ghcr.io/wg-easy/wg-easy:latest
+    image: ghcr.io/wg-easy/wg-easy:15
     container_name: wg-easy
     restart: always
     network_mode: host

@@ -19,6 +19,7 @@ apt-get install idn sudo dnsutils wamerican wireguard-tools zip unzip python3 wg
 export GIT_BRANCH="main"
 export GIT_REPO="patronJS/mytests"
 export XRAY_VERSION="v26.3.23"
+# Pinned versions: yq=v4.52.5, marzban-node=v0.5.2, wg-easy=15, angie=minimal
 TEMPLATE_URL="https://raw.githubusercontent.com/$GIT_REPO/refs/heads/$GIT_BRANCH/templates_for_script"
 
 fetch_template() {
@@ -160,21 +161,21 @@ grep -q "net.ipv6.conf.default.disable_ipv6" /etc/sysctl.conf || echo "net.ipv6.
 sysctl -p > /dev/null
 
 # Generate local secrets
-export XRAY_PIK=$(docker run --rm ghcr.io/xtls/xray-core x25519 | head -n1 | cut -d' ' -f 2)
-export XRAY_PBK=$(docker run --rm ghcr.io/xtls/xray-core x25519 -i $XRAY_PIK | tail -2 | head -1 | cut -d' ' -f 2)
+export XRAY_PIK=$(docker run --rm ghcr.io/xtls/xray-core:${XRAY_VERSION#v} x25519 | grep 'PrivateKey' | awk '{print $NF}')
+export XRAY_PBK=$(docker run --rm ghcr.io/xtls/xray-core:${XRAY_VERSION#v} x25519 -i "$XRAY_PIK" | grep 'PublicKey' | awk '{print $NF}')
 export SID1=$(openssl rand -hex 2)
 export SID2=$(openssl rand -hex 4)
 export SID3=$(openssl rand -hex 6)
 export SID4=$(openssl rand -hex 8)
 export SHORT_IDS="\"$SID1\",\"$SID2\",\"$SID3\",\"$SID4\""
 export SHORT_ID=$SID4
-export CLIENT_UUID=$(docker run --rm ghcr.io/xtls/xray-core uuid)
+export CLIENT_UUID=$(docker run --rm ghcr.io/xtls/xray-core:${XRAY_VERSION#v} uuid)
 export CLIENT_XHTTP_PATH=$(openssl rand -hex 12)
 export WG_TUNNEL_PIK=$(wg genkey)
 export WG_TUNNEL_PBK=$(echo $WG_TUNNEL_PIK | wg pubkey)
 export WG_TUNNEL_PEER_PBK="$PANEL_WG_PBK"
 export WG_ADMIN_PASS=$(tr -dc A-Za-z0-9 </dev/urandom | head -c 13; echo)
-export WG_ADMIN_HASH=$(docker run --rm ghcr.io/wg-easy/wg-easy wgpw "$WG_ADMIN_PASS")
+export WG_ADMIN_HASH=$(docker run --rm ghcr.io/wg-easy/wg-easy:15 wgpw "$WG_ADMIN_PASS")
 export WG_UI_PATH=$(openssl rand -hex 8)
 
 # Download XRay core
