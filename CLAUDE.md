@@ -4,27 +4,27 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Two-VPS cascade architecture for VLESS proxy (XRay/Marzban) behind Angie (nginx fork) with REALITY protocol, designed to bypass DPI.
+Two-VPS cascade architecture for VLESS proxy (XRay/Marzban) with REALITY protocol, designed to bypass DPI.
 
-VPS1 (exit, Marzban panel) + VPS2 (entry, independent Marzban panel). Uses XHTTP+REALITY transport between VPS2→VPS1.
+VPS1 (exit, Marzban panel, no domain) + VPS2 (entry, independent Marzban panel). Uses XHTTP+REALITY transport between VPS2→VPS1 on port 49321.
 
 ## Architecture
 
 ### Delivery mechanism
 
-Two bash scripts (`setup-panel.sh` for VPS1, `setup-entry.sh` for VPS2) — download config templates from `templates_for_script/` via raw GitHub URLs, use `envsubst` for templating. Produce Docker Compose stacks in `/opt/xray-vps-setup/` with Angie + XRay/Marzban containers using `network_mode: host`.
+Two bash scripts (`setup-panel.sh` for VPS1, `setup-entry.sh` for VPS2) — download config templates from `templates_for_script/` via raw GitHub URLs, use `envsubst` for templating. Produce Docker Compose stacks in `/opt/xray-vps-setup/` with XRay/Marzban containers using `network_mode: host`.
 
 ### Traffic flow
 
 ```
-Client → VPS2:443 (VLESS+REALITY) → XHTTP+REALITY chain → VPS1:443 → Internet
-Client → VPS2:51820 (WireGuard) → TPROXY → XRay chain → VPS1:443 → Internet
+Client → VPS2:443 (VLESS+REALITY) → XHTTP+REALITY (packet-up) → VPS1:49321 → Internet
+Client → VPS2:51820 (WireGuard) → TPROXY → XRay chain → VPS1:49321 → Internet
 ```
 
-- `setup-panel.sh` — VPS1 installer (Marzban panel + XHTTP inbound, no WG)
+- `setup-panel.sh` — VPS1 installer (Marzban panel + XHTTP inbound on 49321, no domain required)
 - `setup-entry.sh` — VPS2 installer (Marzban panel + steal_oneself + chain outbound + TPROXY + wg-easy)
 
-XRay listens on 443, handles VLESS with REALITY. Marzban panel is reverse-proxied by Angie at randomized paths.
+XRay on VPS1 listens on 49321, handles VLESS with REALITY (steals dl.google.com). VPS1 Marzban panel is accessible via SSH tunnel only — no reverse proxy exposed.
 
 ### Generated secrets
 
@@ -50,9 +50,8 @@ bash <(wget -qO- https://raw.githubusercontent.com/patronJS/mytests/refs/heads/m
 
 | Template | Purpose |
 |----------|---------|
-| `panel-xray` | VPS1: XRay XHTTP+REALITY inbound |
-| `panel-angie` | VPS1: Angie (TLS + Marzban panel proxy) |
-| `compose-panel` | VPS1: Docker Compose (angie + marzban) |
+| `panel-xray` | VPS1: XRay XHTTP+REALITY inbound on 49321 |
+| `compose-panel` | VPS1: Docker Compose (marzban only, no angie) |
 | `node-xray` | VPS2: XRay steal_oneself + chain outbound + dokodemo-door TPROXY |
 | `node-angie` | VPS2: Angie (TLS + wg-easy UI proxy) |
 | `compose-cascade-node` | VPS2: Docker Compose (angie + marzban + wg-easy) |
@@ -64,11 +63,15 @@ Templates use `$ENVVAR` syntax (processed via `envsubst`).
 
 ## Important Notes
 
-- Ports 80, 443, 4123 are reserved — SSH must not use them
+- VPS1 only exposes port 49321 (XHTTP+REALITY inbound) + SSH — no 80/443/4123
+- VPS2 ports 80, 443 reserved for Angie — SSH must not use them
 - WARP integration patches XRay config post-deploy via `yq` to add SOCKS outbound on port 40000
-- XRay core version is pinned to v26.3.23
+- XRay core version is pinned to v26.3.27
 - XHTTP transport requires XRay >= v26.3.23
 - `flow: xtls-rprx-vision` MUST NOT be set on XHTTP inbounds or outbounds
-- `mode: "stream-one"` pinned in chain outbound (auto has bug #5635)
+- `mode: "packet-up"` pinned in chain outbound (stream-one deprecated; auto has bug #5635)
+- `xPaddingBytes: 300-2000` set on XHTTP transport for traffic shaping
+- REALITY on VPS1 steals `dl.google.com` — no own domain needed on VPS1
+- VPS1 Marzban panel accessible via SSH tunnel only (no public reverse proxy)
 - WG client traffic routed through TPROXY → dokodemo-door → chain outbound
-- No WireGuard tunnel between servers — all inter-server traffic via XHTTP+REALITY
+- No WireGuard tunnel between servers — all inter-server traffic via XHTTP+REALITY on 49321

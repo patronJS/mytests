@@ -9,18 +9,20 @@
 ```
 VPS1 (Германия — exit)               VPS2 (Россия — entry)
 ┌─────────────────────┐            ┌──────────────────────────┐
-│ Marzban panel       │            │ Marzban panel            │
-│ (технический,       │            │ (управление клиентами)   │
-│  1 пользователь)    │            │                          │
-│                     │            │ XRay inbounds:           │
-│ XRay inbound        │◄──XHTTP───│  - VLESS+REALITY :443    │
-│ XHTTP+REALITY :443  │  +REALITY │  - TPROXY (dokodemo-door)│
+│ Marzban (SSH only)  │            │ Marzban panel            │
+│                     │            │ (управление клиентами)   │
+│ XRay :49321         │            │                          │
+│ XHTTP+REALITY      │◄──XHTTP───│ XRay chain outbound      │
+│ steal dl.google.com │  +REALITY │ mode: packet-up          │
+│                     │  :49321   │                          │
+│ NO Angie            │            │ XRay client inbounds:    │
+│ NO domain           │            │  - VLESS+REALITY TCP:443 │
+│ NO WireGuard        │            │  - TPROXY (dokodemo-door)│
 │                     │            │                          │
-│ Angie (TLS, ACME)   │            │ XRay chain outbound      │
-│                     │            │                          │
-│ Нет WireGuard       │            │ wg-easy :51820           │
-│ Нет NAT             │            │ Angie (TLS, ACME)        │
-└─────────────────────┘            └──────────────────────────┘
+└─────────────────────┘            │ Angie (TLS, ACME)        │
+                                   │ wg-easy :51820           │
+                                   │ Confluence camouflage    │
+                                   └──────────────────────────┘
 ```
 
 Два способа подключения клиента к VPS2:
@@ -32,39 +34,34 @@ VPS1 (Германия — exit)               VPS2 (Россия — entry)
 
 Компоненты:
 
-- **VPS1** — Marzban-панель + XRay XHTTP+REALITY inbound. WireGuard на VPS1 отсутствует
-- **VPS2** — Независимая Marzban-панель + XRay (VLESS inbound + TPROXY + chain outbound) + wg-easy
+- **VPS1** — Marzban + XRay XHTTP+REALITY inbound на порту 49321. Домен не нужен — REALITY крадёт `dl.google.com`. Панель доступна только через SSH-туннель
+- **VPS2** — Независимая Marzban-панель + XRay (VLESS inbound + TPROXY + chain outbound) + wg-easy + Angie (TLS, ACME)
 
 Клиенты создаются в панели VPS2. Оба типа подключений (VLESS и WG) выходят в интернет с IP VPS1 (Германия).
-
-XRay слушает :443 и :51820. Angie (форк nginx) занимается TLS через ACME и проксирует панели на рандомных путях. Для маскировки страницы используется [Confluence](https://github.com/Jolymmiles/confluence-marzban-home).
 
 ## Установка
 
 ### Что понадобится
 
 - **2 VPS** с Ubuntu 24.04 и root-доступом:
-  - VPS1 (Германия) — выходной сервер
+  - VPS1 (Германия) — выходной сервер, домен **не нужен**
   - VPS2 (Россия) — входной сервер, точка подключения клиентов
-- **2 домена** (или поддомена), по одному на каждый VPS
-- **DNS A-записи** настроены заранее: каждый домен → IP своего VPS
-- Порты **80**, **443**, **4123** свободны на обоих серверах
+- **1 домен** (или поддомен) для VPS2, DNS A-запись настроена заранее
+- Порты **80**, **443** свободны на VPS2; порт **49321** свободен на VPS1
 
-> Скрипты интерактивные и долгие — рекомендуется запускать через `tmux`, чтобы не потерять сессию при обрыве SSH.
+> Скрипты долгие — рекомендуется запускать через `tmux`, чтобы не потерять сессию при обрыве SSH.
 
 ---
 
 ### Шаг 1. Подготовка DNS
 
-Перед началом убедитесь, что DNS-записи уже распространились:
+Перед началом убедитесь, что DNS A-запись для VPS2 уже распространилась:
 
 ```bash
-# Проверить, что домены указывают на нужные IP:
-dig +short vps1.example.com   # должен вернуть IP VPS1
 dig +short vps2.example.com   # должен вернуть IP VPS2
 ```
 
-Если записи ещё не обновились — подождите. Скрипты проверяют DNS и предупредят, если запись не совпадает.
+Если запись ещё не обновилась — подождите. Для VPS1 домен не нужен.
 
 ---
 
@@ -80,21 +77,20 @@ sysctl -w net.ipv6.conf.default.disable_ipv6=1
 bash <(wget -qO- https://raw.githubusercontent.com/patronJS/mytests/refs/heads/main/setup-panel.sh)
 ```
 
-Скрипт спросит только **домен VPS1** и всё сделает автоматически:
+Скрипт **ничего не спрашивает** — полностью автоматический.
 
-- Установит Docker, XRay, Angie, Marzban
-- Сгенерирует ключи, UUID, рандомные пути
+Устанавливает Docker, XRay, Marzban. Генерирует ключи x25519, UUID, рандомные пути. Angie и домен не нужны.
 
 В конце скрипт выведет блок значений — **сохраните его целиком**, он понадобится на следующем шаге:
 
 ```
 =========================================
- Panel URL:     https://vps1.example.com/<random_path>
- Panel user:    <random>
- Panel pass:    <random>
+ Marzban panel (via SSH tunnel):
+   ssh -L 8000:localhost:8000 root@<VPS1_IP>
+   http://localhost:8000/<random_path>
 
  === Values for setup-entry.sh ===
- VPS1_DOMAIN:    vps1.example.com
+ VPS1_IP:        <ip>
  VPS1_PBK:       <public_key>
  VPS1_SHORT_ID:  <hex>
  UUID_LINK:      <uuid>
@@ -121,8 +117,7 @@ bash <(wget -qO- https://raw.githubusercontent.com/patronJS/mytests/refs/heads/m
 | Вопрос                          | Откуда взять                       |
 | ------------------------------- | ---------------------------------- |
 | Enter your domain               | Домен VPS2                         |
-| Enter VPS1 domain               | `VPS1_DOMAIN` из вывода шага 2     |
-| Enter VPS1 IP address           | IP-адрес VPS1                      |
+| Enter VPS1 IP address           | `VPS1_IP` из вывода шага 2         |
 | Enter VPS1 public key (PBK)     | `VPS1_PBK` из вывода шага 2        |
 | Enter VPS1 short ID             | `VPS1_SHORT_ID` из вывода шага 2   |
 | Enter inter-VPS UUID            | `UUID_LINK` из вывода шага 2       |
@@ -156,13 +151,15 @@ bash <(wget -qO- https://raw.githubusercontent.com/patronJS/mytests/refs/heads/m
 1. Откройте web-интерфейс wg-easy (URL выводится в конце скрипта)
 2. Создайте peer и скачайте конфигурацию
 
-Проверьте IP после подключения на [ipinfo.io](https://ipinfo.io) — должен показать IP VPS1 (Германия).
+### Проверка
+
+Подключитесь и откройте [ipinfo.io](https://ipinfo.io) — должен показать IP VPS1 (Германия).
 
 ## Потоки трафика
 
 ```
-VLESS-клиент  → VPS2:443  → XHTTP+REALITY → VPS1:443 → Интернет
-WG-клиент     → VPS2:51820 → TPROXY → XRay chain → VPS1:443 → Интернет
+VLESS-клиент  → VPS2:443   → XHTTP+REALITY → VPS1:49321 → Интернет
+WG-клиент     → VPS2:51820 → TPROXY → XRay chain → VPS1:49321 → Интернет
 ```
 
 Межсерверного WireGuard-туннеля нет — всё межсерверное взаимодействие идёт через XHTTP+REALITY.
@@ -180,13 +177,14 @@ docker compose -f /opt/xray-vps-setup/docker-compose.yml logs -f
 
 ## Важные детали
 
-- Порты 80, 443, 4123 зарезервированы — SSH не может их использовать
-- XRay core пригвождён к v26.3.23 (минимум для XHTTP)
+- Порты 80 и 443 зарезервированы на VPS2; порт 49321 — на VPS1 для межсерверного соединения
+- XRay core v26.3.27 (минимум для XHTTP)
 - `flow: xtls-rprx-vision` **нельзя** ставить на XHTTP inbound/outbound
-- `mode: "stream-one"` зафиксирован в chain outbound (в `auto` есть баг #5635)
-- На VPS1 нет WireGuard — ни клиентского, ни туннельного
-- WG-клиенты выходят в интернет с немецким IP через TPROXY → XRay chain → VPS1
-- Перед запуском скриптов отключите IPv6: `sysctl -w net.ipv6.conf.all.disable_ipv6=1` и `sysctl -w net.ipv6.conf.default.disable_ipv6=1`
+- `mode: packet-up` в chain outbound — предотвращает замораживание сессии TSPU при пакетах >15 KB
+- `xPaddingBytes: 300-2000` — менее детектируемо, чем дефолтный диапазон 100-1000
+- VPS1 не имеет домена — REALITY крадёт `dl.google.com`; Angie и сертификаты не нужны
+- WG-клиенты маршрутизируются через TPROXY → XRay chain → VPS1; NAT на стороне VPS1
+- IPv6 необходимо отключить до запуска скриптов
 
 ## Связь
 
