@@ -32,6 +32,7 @@
     {
       "tag": "xhttp-in",
       "listen": "@xhttp",
+      "port": 0,
       "protocol": "vless",
       "settings": {
         "clients": [{"id": "$CLIENT_UUID"}],
