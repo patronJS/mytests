@@ -19,7 +19,7 @@ apt-get install idn sudo dnsutils wamerican zip unzip python3 wget curl openssl 
 export GIT_BRANCH="main"
 export GIT_REPO="patronJS/mytests"
 export XRAY_VERSION="v26.3.27"
-# Pinned versions: yq=v4.52.5, marzban=latest, wg-easy=15, angie=minimal
+# Pinned versions: yq=v4.52.5, marzban=latest, wg-easy=14, angie=minimal
 TEMPLATE_URL="https://raw.githubusercontent.com/$GIT_REPO/refs/heads/$GIT_BRANCH/templates_for_script"
 
 fetch_template() {
