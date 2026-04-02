@@ -14,7 +14,7 @@ sysctl -w net.ipv6.conf.default.disable_ipv6=1 > /dev/null
 
 # Install dependencies
 apt-get update
-apt-get install sudo wamerican zip unzip python3 wget curl openssl gettext -y
+apt-get install sudo idn dnsutils wamerican zip unzip python3 wget curl openssl gettext -y
 
 export GIT_BRANCH="main"
 export GIT_REPO="patronJS/mytests"
@@ -28,6 +28,50 @@ fetch_template() {
   [ -n "$content" ] || { echo "Template is empty: $1"; exit 1; }
   echo "$content"
 }
+
+# Read domain input
+read -ep "Enter VPS1 domain:"$'\n' input_domain
+
+export VPS1_DOMAIN=$(echo "$input_domain" | idn)
+export VLESS_DOMAIN="$VPS1_DOMAIN"
+
+SERVER_IPS=($(hostname -I))
+
+RESOLVED_IP=$(dig +short $VPS1_DOMAIN | tail -n1)
+
+if [ -z "$RESOLVED_IP" ]; then
+  echo "Warning: Domain has no DNS record"
+  read -ep "Are you sure? That domain has no DNS record. If you didn't add that you will have to restart xray and angie by yourself [y/N]"$'\n' prompt_response
+  if [[ "$prompt_response" =~ ^([yY])$ ]]; then
+    echo "Ok, proceeding without DNS verification"
+  else
+    echo "Come back later"
+    exit 1
+  fi
+else
+  MATCH_FOUND=false
+  for server_ip in "${SERVER_IPS[@]}"; do
+    if [ "$RESOLVED_IP" == "$server_ip" ]; then
+      MATCH_FOUND=true
+      break
+    fi
+  done
+
+  if [ "$MATCH_FOUND" = true ]; then
+    echo "✓ DNS record points to this server ($RESOLVED_IP)"
+  else
+    echo "Warning: DNS record exists but points to different IP"
+    echo "  Domain resolves to: $RESOLVED_IP"
+    echo "  This server's IPs: ${SERVER_IPS[*]}"
+    read -ep "Continue anyway? [y/N]"$'\n' prompt_response
+    if [[ "$prompt_response" =~ ^([yY])$ ]]; then
+      echo "Ok, proceeding"
+    else
+      echo "Come back later"
+      exit 1
+    fi
+  fi
+fi
 
 # Install Docker
 docker_install() {
@@ -79,7 +123,6 @@ export MARZBAN_USER=$(grep -E '^[a-z]{4,6}$' /usr/share/dict/words | shuf -n 1)
 export MARZBAN_PASS=$(tr -dc A-Za-z0-9 </dev/urandom | head -c 13; echo)
 export MARZBAN_PATH=$(openssl rand -hex 8)
 export MARZBAN_SUB_PATH=$(openssl rand -hex 8)
-export VLESS_DOMAIN="localhost"
 
 # Download XRay core
 mkdir -p /opt/xray-vps-setup/marzban/xray-core
@@ -93,15 +136,20 @@ unzip -qo /tmp/xray.zip -d /opt/xray-vps-setup/marzban/xray-core
 # Download and envsubst templates
 mkdir -p /opt/xray-vps-setup/marzban
 cd /opt/xray-vps-setup
-fetch_template "panel-xray" | envsubst > ./marzban/xray_config.json
+fetch_template "panel-xray" | envsubst '$UUID_LINK $XHTTP_PATH $SHORT_IDS $XRAY_PIK $XRAY_PBK $VPS1_DOMAIN' > ./marzban/xray_config.json
 fetch_template "compose-panel" | envsubst > ./docker-compose.yml
 fetch_template "marzban" | envsubst > ./marzban/.env
+fetch_template "panel-angie" | envsubst '$VPS1_DOMAIN' > ./angie.conf
+fetch_template "confluence" | envsubst > ./index.html
 
 # File permissions
 chmod 600 ./marzban/xray_config.json ./marzban/.env
 chmod 644 ./docker-compose.yml
+chmod 644 ./angie.conf ./index.html
 
 # Start containers
+# Open port 80 for ACME before starting Angie
+iptables -C INPUT -p tcp -m tcp --dport 80 -j ACCEPT 2>/dev/null || iptables -A INPUT -p tcp -m tcp --dport 80 -j ACCEPT
 docker compose -f /opt/xray-vps-setup/docker-compose.yml up -d
 
 # Marzban init — wait until API is ready (up to 60s)
@@ -140,6 +188,7 @@ iptables_add INPUT -p icmp -j ACCEPT
 iptables_add INPUT -m state --state RELATED,ESTABLISHED -j ACCEPT
 iptables_add INPUT -p tcp -m state --state NEW -m tcp --dport $SSH_PORT -j ACCEPT
 iptables_add INPUT -p tcp -m tcp --dport 49321 -j ACCEPT
+iptables_add INPUT -p tcp -m tcp --dport 80 -j ACCEPT
 iptables_add INPUT -i lo -j ACCEPT
 iptables_add OUTPUT -o lo -j ACCEPT
 iptables -P INPUT DROP
@@ -162,4 +211,5 @@ echo " VPS1_PBK:        $XRAY_PBK"
 echo " VPS1_SHORT_ID:   $SHORT_ID"
 echo " UUID_LINK:       $UUID_LINK"
 echo " XHTTP_PATH:      $XHTTP_PATH"
+echo " VPS1_DOMAIN:      $VPS1_DOMAIN"
 echo "========================================="
