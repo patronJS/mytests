@@ -17,14 +17,13 @@ Two bash scripts (`setup-panel.sh` for VPS1, `setup-entry.sh` for VPS2) — down
 ### Traffic flow
 
 ```
-Client → VPS2:443 (VLESS+REALITY) → XHTTP+REALITY (packet-up) → VPS1:49321 → Internet
-Client → VPS2:51820 (WireGuard) → TPROXY → XRay chain → VPS1:49321 → Internet
+Client → VPS2:443 (VLESS+REALITY, steal_oneself) → XHTTP+REALITY (packet-up) → VPS1:49321 (steal_oneself) → Internet
 ```
 
 - `setup-panel.sh` — VPS1 installer (Marzban panel + XHTTP inbound on 49321, no domain required)
-- `setup-entry.sh` — VPS2 installer (Marzban panel + steal_oneself + chain outbound + TPROXY + wg-easy)
+- `setup-entry.sh` — VPS2 installer (Marzban panel + steal_oneself + chain outbound)
 
-XRay on VPS1 listens on 49321, handles VLESS with REALITY (steals dl.google.com). VPS1 Marzban panel is accessible via SSH tunnel only — no reverse proxy exposed.
+XRay on VPS1 listens on 49321, handles VLESS with REALITY (steal_oneself with own domain + Angie). VPS1 Marzban panel is accessible via SSH tunnel only.
 
 ### Generated secrets
 
@@ -51,6 +50,7 @@ bash <(wget -qO- https://raw.githubusercontent.com/patronJS/mytests/refs/heads/m
 | Template | Purpose |
 |----------|---------|
 | `panel-xray` | VPS1: XRay XHTTP+REALITY inbound on 49321 |
+| `panel-angie` | VPS1: Angie (TLS + ACME + Confluence camouflage) |
 | `compose-panel` | VPS1: Docker Compose (marzban only, no angie) |
 | `node-xray` | VPS2: XRay steal_oneself + chain outbound + dokodemo-door TPROXY |
 | `node-angie` | VPS2: Angie (TLS + wg-easy UI proxy) |
@@ -63,7 +63,7 @@ Templates use `$ENVVAR` syntax (processed via `envsubst`).
 
 ## Important Notes
 
-- VPS1 only exposes port 49321 (XHTTP+REALITY inbound) + SSH — no 80/443/4123
+- VPS1 exposes port 49321 (XHTTP+REALITY steal_oneself) + 80 (ACME) + SSH — no 443/4123
 - VPS2 ports 80, 443 reserved for Angie — SSH must not use them
 - WARP integration patches XRay config post-deploy via `yq` to add SOCKS outbound on port 40000
 - XRay core version is pinned to v26.3.27
@@ -71,7 +71,7 @@ Templates use `$ENVVAR` syntax (processed via `envsubst`).
 - `flow: xtls-rprx-vision` MUST NOT be set on XHTTP inbounds or outbounds
 - `mode: "packet-up"` pinned in chain outbound (stream-one deprecated; auto has bug #5635)
 - `xPaddingBytes: 300-2000` set on XHTTP transport for traffic shaping
-- REALITY on VPS1 steals `dl.google.com` — no own domain needed on VPS1
+- REALITY on VPS1 uses steal_oneself with own domain + Angie for TLS termination
 - VPS1 Marzban panel accessible via SSH tunnel only (no public reverse proxy)
-- WG client traffic routed through TPROXY → dokodemo-door → chain outbound
-- No WireGuard tunnel between servers — all inter-server traffic via XHTTP+REALITY on 49321
+- VPS1 exposes port 80 for ACME HTTP-01 certificate renewal only
+- Both VPS use own domains — eliminates ASN mismatch detectable by TSPU
