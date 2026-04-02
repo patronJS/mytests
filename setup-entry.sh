@@ -12,10 +12,6 @@ fi
 sysctl -w net.ipv6.conf.all.disable_ipv6=1 > /dev/null
 sysctl -w net.ipv6.conf.default.disable_ipv6=1 > /dev/null
 
-# Switch to iptables-legacy (TPROXY module requires legacy, nft backend ignores legacy rules)
-update-alternatives --set iptables /usr/sbin/iptables-legacy 2>/dev/null || true
-update-alternatives --set ip6tables /usr/sbin/ip6tables-legacy 2>/dev/null || true
-
 # Install dependencies
 apt-get update
 apt-get install idn sudo dnsutils wamerican zip unzip python3 wget curl openssl gettext -y
@@ -23,7 +19,7 @@ apt-get install idn sudo dnsutils wamerican zip unzip python3 wget curl openssl 
 export GIT_BRANCH="main"
 export GIT_REPO="patronJS/mytests"
 export XRAY_VERSION="v26.3.27"
-# Pinned versions: yq=v4.52.5, marzban=latest, wg-easy=14, angie=minimal
+# Pinned versions: yq=v4.52.5, marzban=latest, angie=minimal
 TEMPLATE_URL="https://raw.githubusercontent.com/$GIT_REPO/refs/heads/$GIT_BRANCH/templates_for_script"
 
 fetch_template() {
@@ -82,6 +78,7 @@ read -ep "Enter VPS1 public key (PBK):"$'\n' VPS1_PBK; export VPS1_PBK
 read -ep "Enter VPS1 short ID:"$'\n' VPS1_SHORT_ID; export VPS1_SHORT_ID
 read -ep "Enter inter-VPS UUID:"$'\n' UUID_LINK; export UUID_LINK
 read -ep "Enter XHTTP path:"$'\n' XHTTP_PATH; export XHTTP_PATH
+read -ep "Enter VPS1 domain:"$'\n' VPS1_DOMAIN; export VPS1_DOMAIN
 
 # Input validation
 [[ "$UUID_LINK" =~ ^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$ ]] || { echo "Invalid UUID_LINK format"; exit 1; }
@@ -89,6 +86,8 @@ read -ep "Enter XHTTP path:"$'\n' XHTTP_PATH; export XHTTP_PATH
 [[ "$VPS1_SHORT_ID" =~ ^[0-9a-f]{2,16}$ ]] && (( ${#VPS1_SHORT_ID} % 2 == 0 )) || { echo "Invalid VPS1_SHORT_ID: must be 2-16 even-length hex chars"; exit 1; }
 [[ "$VPS1_IP" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "Invalid VPS1_IP format"; exit 1; }
 [[ "$XHTTP_PATH" =~ ^[0-9a-f]{24}$ ]] || { echo "Invalid XHTTP_PATH format"; exit 1; }
+[[ "$VPS1_DOMAIN" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]] && { echo "VPS1_DOMAIN must be a domain name, not an IP address"; exit 1; }
+[[ "$VPS1_DOMAIN" =~ ^[a-zA-Z0-9]([a-zA-Z0-9.-]*[a-zA-Z0-9])?\.[a-zA-Z]{2,}$ ]] || { echo "Invalid VPS1_DOMAIN format"; exit 1; }
 
 # Optional config prompts
 read -ep "Do you want to harden SSH? [y/N] "$'\n' configure_ssh_input
@@ -143,12 +142,11 @@ yq_install() {
 
 yq_install
 
-# Check congestion protocol and enable ip_forward
+# Check congestion protocol and persist sysctl settings
 if ! sysctl net.ipv4.tcp_congestion_control | grep -q bbr; then
   echo "net.core.default_qdisc=fq" >> /etc/sysctl.conf
   echo "net.ipv4.tcp_congestion_control=bbr" >> /etc/sysctl.conf
 fi
-grep -q "net.ipv4.ip_forward" /etc/sysctl.conf || echo "net.ipv4.ip_forward=1" >> /etc/sysctl.conf
 grep -q "net.ipv6.conf.all.disable_ipv6" /etc/sysctl.conf || echo "net.ipv6.conf.all.disable_ipv6=1" >> /etc/sysctl.conf
 grep -q "net.ipv6.conf.default.disable_ipv6" /etc/sysctl.conf || echo "net.ipv6.conf.default.disable_ipv6=1" >> /etc/sysctl.conf
 sysctl -p > /dev/null
@@ -164,11 +162,6 @@ export SHORT_IDS="\"$SID1\",\"$SID2\",\"$SID3\",\"$SID4\""
 export SHORT_ID=$SID4
 export CLIENT_UUID=$(docker run --rm ghcr.io/xtls/xray-core:${XRAY_VERSION#v} uuid)
 export CLIENT_XHTTP_PATH=$(openssl rand -hex 12)
-export WG_ADMIN_PASS=$(tr -dc A-Za-z0-9 </dev/urandom | head -c 13; echo)
-pip3 install bcrypt -q 2>/dev/null || apt-get install -y python3-bcrypt -q 2>/dev/null
-WG_ADMIN_HASH_RAW=$(python3 -c "import bcrypt; print(bcrypt.hashpw(b'$WG_ADMIN_PASS', bcrypt.gensalt()).decode())")
-export WG_ADMIN_HASH="${WG_ADMIN_HASH_RAW//\$/\$\$}"
-export WG_UI_PATH=$(openssl rand -hex 8)
 export MARZBAN_USER=$(grep -E '^[a-z]{4,6}$' /usr/share/dict/words | shuf -n 1)
 export MARZBAN_PASS=$(tr -dc A-Za-z0-9 </dev/urandom | head -c 13; echo)
 export MARZBAN_PATH=$(openssl rand -hex 8)
@@ -186,9 +179,9 @@ unzip -qo /tmp/xray.zip -d /opt/xray-vps-setup/node/xray-core
 # Download and envsubst templates
 mkdir -p /opt/xray-vps-setup/node
 cd /opt/xray-vps-setup
-fetch_template "node-xray" | envsubst > ./node/xray_config.json
-fetch_template "node-angie" | envsubst '$VLESS_DOMAIN $WG_UI_PATH $MARZBAN_PATH $MARZBAN_SUB_PATH' > ./angie.conf
-fetch_template "compose-cascade-node" | envsubst '$VLESS_DOMAIN $WG_ADMIN_HASH $WG_UI_PATH' > ./docker-compose.yml
+fetch_template "node-xray" | envsubst '$CLIENT_UUID $CLIENT_XHTTP_PATH $XRAY_PIK $XRAY_PBK $SHORT_IDS $VPS1_IP $VPS1_PBK $VPS1_SHORT_ID $UUID_LINK $XHTTP_PATH $VPS1_DOMAIN $VLESS_DOMAIN' > ./node/xray_config.json
+fetch_template "node-angie" | envsubst '$VLESS_DOMAIN $MARZBAN_PATH $MARZBAN_SUB_PATH' > ./angie.conf
+fetch_template "compose-cascade-node" | envsubst '$VLESS_DOMAIN' > ./docker-compose.yml
 fetch_template "confluence" | envsubst > ./index.html
 fetch_template "marzban" | envsubst > ./node/.env
 chmod 600 ./node/.env
@@ -279,7 +272,6 @@ iptables_add INPUT -m state --state RELATED,ESTABLISHED -j ACCEPT
 iptables_add INPUT -p tcp -m state --state NEW -m tcp --dport $SSH_PORT -j ACCEPT
 iptables_add INPUT -p tcp -m tcp --dport 80 -j ACCEPT
 iptables_add INPUT -p tcp -m tcp --dport 443 -j ACCEPT
-iptables_add INPUT -p udp -m udp --dport 41820 -j ACCEPT
 iptables_add INPUT -i lo -j ACCEPT
 iptables_add OUTPUT -o lo -j ACCEPT
 iptables -P INPUT DROP
@@ -358,9 +350,6 @@ echo "========================================="
 echo " VPS2 Marzban Panel: https://$VLESS_DOMAIN/$MARZBAN_PATH"
 echo " Panel user: $MARZBAN_USER"
 echo " Panel pass: $MARZBAN_PASS"
-echo ""
-echo " WireGuard UI: https://$VLESS_DOMAIN/$WG_UI_PATH/"
-echo " WG admin password: $WG_ADMIN_PASS"
 echo ""
 echo " === Next steps ==="
 echo " 1. Open Marzban panel and create users"
