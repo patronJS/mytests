@@ -1,4 +1,14 @@
 services:
+  angie:
+    image: docker.angie.software/angie:minimal
+    container_name: angie
+    restart: always
+    network_mode: host
+    volumes:
+      - angie-data:/var/lib/angie
+      - ./angie.conf:/etc/angie/angie.conf:ro
+      - ./index.html:/tmp/index.html:ro
+
   marzban:
     image: gozargah/marzban:latest
     container_name: marzban
@@ -11,5 +21,9 @@ services:
       - marzban_lib:/var/lib/marzban
 
 volumes:
+  angie-data:
+    driver: local
+    external: false
+    name: angie-data
   marzban_lib:
     driver: local
