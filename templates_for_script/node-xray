@@ -47,24 +47,6 @@
         "destOverride": ["http", "tls"],
         "routeOnly": true
       }
-    },
-    {
-      "tag": "tproxy-in",
-      "port": 12345,
-      "protocol": "dokodemo-door",
-      "settings": {
-        "network": "tcp,udp",
-        "followRedirect": true
-      },
-      "streamSettings": {
-        "sockopt": {
-          "tproxy": "tproxy"
-        }
-      },
-      "sniffing": {
-        "enabled": true,
-        "destOverride": ["http", "tls"]
-      }
     }
   ],
   "outbounds": [
@@ -87,13 +69,10 @@
           "extra": {"xPaddingBytes": "300-2000"}
         },
         "realitySettings": {
-          "serverName": "dl.google.com",
+          "serverName": "$VPS1_DOMAIN",
           "fingerprint": "chrome",
           "publicKey": "$VPS1_PBK",
           "shortId": "$VPS1_SHORT_ID"
-        },
-        "sockopt": {
-          "mark": 255
         }
       }
     },
@@ -103,7 +82,7 @@
   "routing": {
     "rules": [
       {"protocol": "bittorrent", "outboundTag": "block"},
-      {"inboundTag": ["reality-tcp", "xhttp-in", "tproxy-in"], "outboundTag": "chain-vps1"}
+      {"inboundTag": ["reality-tcp", "xhttp-in"], "outboundTag": "chain-vps1"}
     ],
     "domainStrategy": "IPIfNonMatch"
   },
