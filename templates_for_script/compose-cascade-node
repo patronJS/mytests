@@ -15,34 +15,10 @@ services:
     restart: always
     env_file: ./node/.env
     network_mode: host
-    cap_add:
-      - NET_ADMIN
     volumes:
       - ./node/xray_config.json:/code/xray_config.json
       - ./node/xray-core:/code/xray-core:ro
       - marzban_lib:/var/lib/marzban
-
-  wg-easy:
-    image: ghcr.io/wg-easy/wg-easy:14
-    container_name: wg-easy
-    restart: always
-    network_mode: host
-    cap_add:
-      - NET_ADMIN
-      - SYS_MODULE
-    environment:
-      - WG_HOST=$VLESS_DOMAIN
-      - PASSWORD_HASH=$WG_ADMIN_HASH
-      - WG_PORT=41820
-      - WG_DEFAULT_DNS=1.1.1.1
-      - WG_ALLOWED_IPS=0.0.0.0/0, ::/0
-      - WG_MTU=1250
-      - WG_PERSISTENT_KEEPALIVE=30
-      - PORT=51821
-      - WG_POST_UP=ip rule add fwmark 1 table 100 2>/dev/null; ip route add local 0.0.0.0/0 dev lo table 100 2>/dev/null; iptables -t mangle -A PREROUTING -s 10.8.0.0/24 -m mark ! --mark 255 -p tcp -j TPROXY --on-port 12345 --tproxy-mark 1; iptables -t mangle -A PREROUTING -s 10.8.0.0/24 -m mark ! --mark 255 -p udp -j TPROXY --on-port 12345 --tproxy-mark 1
-      - WG_POST_DOWN=iptables -t mangle -D PREROUTING -s 10.8.0.0/24 -m mark ! --mark 255 -p tcp -j TPROXY --on-port 12345 --tproxy-mark 1 2>/dev/null; iptables -t mangle -D PREROUTING -s 10.8.0.0/24 -m mark ! --mark 255 -p udp -j TPROXY --on-port 12345 --tproxy-mark 1 2>/dev/null; ip route del local 0.0.0.0/0 dev lo table 100 2>/dev/null; ip rule del fwmark 1 table 100 2>/dev/null
-    volumes:
-      - wg-data:/etc/wireguard
 
 volumes:
   angie-data:
@@ -50,6 +26,4 @@ volumes:
     external: false
     name: angie-data
   marzban_lib:
-    driver: local
-  wg-data:
     driver: local
