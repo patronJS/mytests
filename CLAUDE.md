@@ -27,7 +27,7 @@ XRay on VPS1 listens on 49321, handles VLESS with REALITY (steal_oneself with ow
 
 ### Generated secrets
 
-Scripts generate at runtime: x25519 key pairs (PIK/PBK), XRay UUIDs, WireGuard tunnel keys, admin credentials + randomized panel/subscription/UI paths.
+Scripts generate at runtime: x25519 key pairs (PIK/PBK), XRay UUIDs, admin credentials + randomized panel/subscription/UI paths.
 
 ## Commands
 
@@ -51,10 +51,10 @@ bash <(wget -qO- https://raw.githubusercontent.com/patronJS/mytests/refs/heads/m
 |----------|---------|
 | `panel-xray` | VPS1: XRay XHTTP+REALITY inbound on 49321 |
 | `panel-angie` | VPS1: Angie (TLS + ACME + Confluence camouflage) |
-| `compose-panel` | VPS1: Docker Compose (marzban only, no angie) |
-| `node-xray` | VPS2: XRay steal_oneself + chain outbound + dokodemo-door TPROXY |
-| `node-angie` | VPS2: Angie (TLS + wg-easy UI proxy) |
-| `compose-cascade-node` | VPS2: Docker Compose (angie + marzban + wg-easy) |
+| `compose-panel` | VPS1: Docker Compose (angie + marzban) |
+| `node-xray` | VPS2: XRay steal_oneself + chain outbound |
+| `node-angie` | VPS2: Angie (TLS + ACME + Confluence camouflage) |
+| `compose-cascade-node` | VPS2: Docker Compose (angie + marzban) |
 | `marzban` | Marzban `.env` |
 | `confluence` | Camouflage HTML page |
 | `00-disable-password` | SSH hardening config |
