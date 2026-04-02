@@ -180,7 +180,7 @@ unzip -qo /tmp/xray.zip -d /opt/xray-vps-setup/node/xray-core
 mkdir -p /opt/xray-vps-setup/node
 cd /opt/xray-vps-setup
 fetch_template "node-xray" | envsubst '$CLIENT_UUID $CLIENT_XHTTP_PATH $XRAY_PIK $XRAY_PBK $SHORT_IDS $VPS1_IP $VPS1_PBK $VPS1_SHORT_ID $UUID_LINK $XHTTP_PATH $VPS1_DOMAIN $VLESS_DOMAIN' > ./node/xray_config.json
-fetch_template "node-angie" | envsubst '$VLESS_DOMAIN $MARZBAN_PATH $MARZBAN_SUB_PATH' > ./angie.conf
+fetch_template "node-angie" | envsubst '$VLESS_DOMAIN' > ./angie.conf
 fetch_template "compose-cascade-node" | envsubst '$VLESS_DOMAIN' > ./docker-compose.yml
 fetch_template "confluence" | envsubst > ./index.html
 fetch_template "marzban" | envsubst > ./node/.env
@@ -347,13 +347,14 @@ rm -f /tmp/panel_hosts.json /tmp/panel_hosts_updated.json /tmp/xray.zip
 # Output
 clear
 echo "========================================="
-echo " VPS2 Marzban Panel: https://$VLESS_DOMAIN/$MARZBAN_PATH"
+echo " VPS2 Marzban Panel: http://localhost:8000/$MARZBAN_PATH"
+echo " (access via SSH tunnel: ssh -L 8000:localhost:8000 root@<VPS2_IP>)"
 echo " Panel user: $MARZBAN_USER"
 echo " Panel pass: $MARZBAN_PASS"
 echo ""
 echo " === Next steps ==="
-echo " 1. Open Marzban panel and create users"
-echo " 2. Use VLESS links from panel to connect clients"
+echo " 1. Connect via SSH tunnel and open Marzban panel"
+echo " 2. Create users and copy VLESS links to distribute manually"
 echo " 3. Check IP at ipinfo.io — should show VPS1 (Germany)"
 echo "========================================="
 if [[ ${configure_ssh_input,,} == "y" ]]; then
