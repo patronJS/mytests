@@ -82,10 +82,8 @@
   "routing": {
     "rules": [
       {"protocol": "bittorrent", "outboundTag": "block"},
-      {"domain": ["geosite:category-ru", "regexp:.*\\.ru$", "regexp:.*\\.su$", "regexp:.*\\.xn--p1ai$"], "outboundTag": "direct"},
-      {"ip": ["geoip:ru"], "outboundTag": "direct"},
       {"ip": ["geoip:private"], "outboundTag": "direct"},
-      {"inboundTag": ["reality-tcp", "xhttp-in"], "outboundTag": "chain-vps1"}
+      {"inboundTag": ["reality-tcp", "xhttp-in"], "outboundTag": "direct"}
     ],
     "domainStrategy": "IPIfNonMatch"
   },

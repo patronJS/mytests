@@ -179,23 +179,6 @@ elif [[ "$ARCH" == "arm64" ]]; then
 fi
 unzip -qo /tmp/xray.zip -d /opt/xray-vps-setup/node/xray-core
 
-# Download updated geo databases (better Russian IP/domain coverage)
-echo "Downloading updated geoip.dat and geosite.dat..."
-if wget -4 -qO /tmp/geoip.dat "https://github.com/Loyalsoldier/v2ray-rules-dat/releases/latest/download/geoip.dat" && [ -s /tmp/geoip.dat ]; then
-  mv /tmp/geoip.dat /opt/xray-vps-setup/node/xray-core/geoip.dat
-  echo "  geoip.dat updated"
-else
-  echo "  Warning: failed to download geoip.dat, using bundled"
-  rm -f /tmp/geoip.dat
-fi
-if wget -4 -qO /tmp/geosite.dat "https://github.com/Loyalsoldier/v2ray-rules-dat/releases/latest/download/geosite.dat" && [ -s /tmp/geosite.dat ]; then
-  mv /tmp/geosite.dat /opt/xray-vps-setup/node/xray-core/geosite.dat
-  echo "  geosite.dat updated"
-else
-  echo "  Warning: failed to download geosite.dat, using bundled"
-  rm -f /tmp/geosite.dat
-fi
-
 # Download and envsubst templates
 mkdir -p /opt/xray-vps-setup/node
 cd /opt/xray-vps-setup
@@ -346,14 +329,13 @@ warp_install() {
     return 0
   fi
   XRAY_CONFIG_WARP="/opt/xray-vps-setup/node/xray_config.json"
-  # Add WARP SOCKS outbound and switch RU rules from direct → warp
+  # Add WARP SOCKS outbound and switch default catch-all from direct → warp
   if yq eval \
     '.outbounds += {"tag": "warp","protocol": "socks","settings": {"servers": [{"address": "127.0.0.1","port": 40000}]}}' \
     -i "$XRAY_CONFIG_WARP" && \
-     yq eval '(.routing.rules[] | select(.domain != null and (.domain[] | test("category-ru")))).outboundTag = "warp"' -i "$XRAY_CONFIG_WARP" && \
-     yq eval '(.routing.rules[] | select(.ip != null and (.ip[] | test("geoip:ru")))).outboundTag = "warp"' -i "$XRAY_CONFIG_WARP"; then
+     yq eval '(.routing.rules[] | select(.inboundTag != null)).outboundTag = "warp"' -i "$XRAY_CONFIG_WARP"; then
     docker compose -f /opt/xray-vps-setup/docker-compose.yml restart
-    echo "WARP enabled for Russian traffic"
+    echo "WARP enabled as default outbound"
   else
     echo "Warning: failed to patch XRay config for WARP, continuing without it"
   fi
@@ -363,49 +345,101 @@ if [[ ${configure_warp_input,,} == "y" ]]; then
   warp_install
 fi
 
-# Install daily geo database update cron job (runs at midnight)
-cat > /usr/local/bin/update-geodata.sh << 'GEODATA_EOF'
+# Create route files for whitelist-based routing
+mkdir -p /opt/xray-vps-setup/routes
+cat > /opt/xray-vps-setup/routes/domains.txt << 'ROUTES_EOF'
+# Domains to route through VPS1 (Germany)
+# One per line. Subdomains included automatically.
+# Supported formats:
+#   netflix.com          — matches netflix.com and *.netflix.com
+#   full:exact.com       — exact match only
+#   regexp:.*\.example$  — regex pattern
+#   geosite:netflix      — from geosite.dat
+#
+# Example:
+# netflix.com
+# youtube.com
+# spotify.com
+# openai.com
+ROUTES_EOF
+
+cat > /opt/xray-vps-setup/routes/ips.txt << 'ROUTES_EOF'
+# IPs/CIDRs to route through VPS1 (Germany)
+# One per line.
+# Supported formats:
+#   1.2.3.4              — single IP
+#   5.6.7.0/24           — CIDR range
+#   geoip:us             — country from geoip.dat
+#
+# Example:
+# 8.8.8.8
+# 1.0.0.0/24
+ROUTES_EOF
+
+# Install apply-routes script
+cat > /usr/local/bin/apply-routes.sh << 'APPLYSCRIPT_EOF'
 #!/bin/bash
 set -euo pipefail
 PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
-XRAY_DIR="/opt/xray-vps-setup/node/xray-core"
-UPDATED=false
-for file in geoip.dat geosite.dat; do
-  if wget -4 -qO "/tmp/$file.new" "https://github.com/Loyalsoldier/v2ray-rules-dat/releases/latest/download/$file" && [ -s "/tmp/$file.new" ]; then
-    if ! cmp -s "/tmp/$file.new" "$XRAY_DIR/$file"; then
-      cp "$XRAY_DIR/$file" "$XRAY_DIR/$file.bak" 2>/dev/null || true
-      mv "/tmp/$file.new" "$XRAY_DIR/$file"
-      UPDATED=true
-    else
-      rm -f "/tmp/$file.new"
-    fi
-  else
-    rm -f "/tmp/$file.new"
-  fi
-done
-if [ "$UPDATED" = true ]; then
-  echo "$(date '+%Y-%m-%d %H:%M:%S') Geo databases updated, restarting marzban"
-  docker compose -f /opt/xray-vps-setup/docker-compose.yml restart marzban
-else
-  echo "$(date '+%Y-%m-%d %H:%M:%S') Geo databases unchanged, no restart needed"
+
+ROUTES_DIR="/opt/xray-vps-setup/routes"
+XRAY_CONFIG="/opt/xray-vps-setup/node/xray_config.json"
+
+if [ ! -f "$XRAY_CONFIG" ]; then
+  echo "Error: $XRAY_CONFIG not found"
+  exit 1
 fi
-GEODATA_EOF
-chmod +x /usr/local/bin/update-geodata.sh
 
-# Register cron job (exact match to avoid removing unrelated entries)
-CRON_LINE="0 0 * * * /usr/local/bin/update-geodata.sh >> /var/log/geodata-update.log 2>&1"
-(crontab -l 2>/dev/null | grep -vF "$CRON_LINE"; echo "$CRON_LINE") | crontab -
+python3 << 'PYEOF'
+import json, os, sys
 
-# Logrotate for geodata update log
-cat > /etc/logrotate.d/geodata-update << 'LOGROTATE_EOF'
-/var/log/geodata-update.log {
-    monthly
-    rotate 3
-    compress
-    missingok
-    notifempty
-}
-LOGROTATE_EOF
+routes_dir = "/opt/xray-vps-setup/routes"
+config_path = "/opt/xray-vps-setup/node/xray_config.json"
+
+def read_list(filepath):
+    if not os.path.exists(filepath):
+        return []
+    with open(filepath) as f:
+        return [l.strip() for l in f if l.strip() and not l.startswith('#')]
+
+def format_domains(raw):
+    prefixes = ('geosite:', 'regexp:', 'full:', 'domain:', 'ext:')
+    return [d if any(d.startswith(p) for p in prefixes) else 'domain:' + d for d in raw]
+
+domains = read_list(os.path.join(routes_dir, "domains.txt"))
+ips = read_list(os.path.join(routes_dir, "ips.txt"))
+
+with open(config_path) as f:
+    config = json.load(f)
+
+# Detect current default outbound (direct or warp)
+default_tag = "direct"
+for rule in config.get('routing', {}).get('rules', []):
+    if 'inboundTag' in rule:
+        default_tag = rule.get('outboundTag', 'direct')
+        break
+
+rules = [{"protocol": "bittorrent", "outboundTag": "block"}]
+if domains:
+    rules.append({"domain": format_domains(domains), "outboundTag": "chain-vps1"})
+if ips:
+    rules.append({"ip": ips, "outboundTag": "chain-vps1"})
+rules.append({"ip": ["geoip:private"], "outboundTag": "direct"})
+rules.append({"inboundTag": ["reality-tcp", "xhttp-in"], "outboundTag": default_tag})
+
+config['routing']['rules'] = rules
+
+with open(config_path, 'w') as f:
+    json.dump(config, f, indent=2)
+
+print(f"Routes: {len(domains)} domains, {len(ips)} IPs -> chain-vps1")
+print(f"Default outbound: {default_tag}")
+PYEOF
+
+docker compose -f /opt/xray-vps-setup/docker-compose.yml restart marzban
+echo "XRay restarted with updated routes"
+APPLYSCRIPT_EOF
+chmod +x /usr/local/bin/apply-routes.sh
 
 # Cleanup temp files
 rm -f /tmp/panel_hosts.json /tmp/panel_hosts_updated.json /tmp/xray.zip
@@ -418,10 +452,17 @@ echo " (access via SSH tunnel: ssh -L 8000:localhost:8000 root@<VPS2_IP>)"
 echo " Panel user: $MARZBAN_USER"
 echo " Panel pass: $MARZBAN_PASS"
 echo ""
+echo " === Routing ==="
+echo " By default all traffic goes direct from VPS2."
+echo " To route specific sites through VPS1 (Germany):"
+echo "   1. Edit /opt/xray-vps-setup/routes/domains.txt"
+echo "   2. Edit /opt/xray-vps-setup/routes/ips.txt"
+echo "   3. Run: apply-routes.sh"
+echo ""
 echo " === Next steps ==="
 echo " 1. Connect via SSH tunnel and open Marzban panel"
-echo " 2. Create users and copy VLESS links to distribute manually"
-echo " 3. Check IP at ipinfo.io — should show VPS1 (Germany)"
+echo " 2. Add domains/IPs to route files and run apply-routes.sh"
+echo " 3. Create users and copy VLESS links to distribute"
 echo "========================================="
 if [[ ${configure_ssh_input,,} == "y" ]]; then
   echo " SSH user: $SSH_USER, SSH password: $SSH_USER_PASS, SSH port: $SSH_PORT"

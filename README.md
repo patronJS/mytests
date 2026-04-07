@@ -156,34 +156,31 @@ bash <(wget -qO- https://raw.githubusercontent.com/patronJS/mytests/refs/heads/m
 ## Потоки трафика
 
 ```
-# Зарубежный трафик — через цепочку VPS1
-VLESS-клиент  → VPS2:443   → XHTTP+REALITY → VPS1:49321 → Интернет
+# Трафик из whitelist — через цепочку VPS1
+VLESS-клиент  → VPS2:443   → XHTTP+REALITY → VPS1:49321 → Интернет (немецкий IP)
 
-# Российский трафик — напрямую с VPS2 (или через WARP)
-VLESS-клиент  → VPS2:443   → direct/WARP   → Российские сайты
+# Всё остальное — напрямую с VPS2 (или через WARP)
+VLESS-клиент  → VPS2:443   → direct/WARP   → Интернет (российский IP)
 ```
 
-### Split routing (VPS2)
+### Whitelist routing (VPS2)
 
-Трафик на российские ресурсы не уходит в Германию — обрабатывается на VPS2:
+По умолчанию весь трафик идёт напрямую с VPS2. Только указанные домены/IP маршрутизируются через VPS1 (Германия).
 
-| Правило | Покрытие | Outbound |
-|---------|----------|----------|
-| `geosite:category-ru` + `regexp:*.ru/*.su/*.рф` | Российские домены | `direct` (или `warp`) |
-| `geoip:ru` | Российские IP-диапазоны (RIPE) | `direct` (или `warp`) |
-| `geoip:private` | Локальные сети | `direct` |
-| Всё остальное | Зарубежный трафик | `chain-vps1` |
+Управление маршрутами — два текстовых файла на VPS2:
 
-`domainStrategy: IPIfNonMatch` — если домен не совпал с geosite, XRay резолвит его в IP и проверяет geoip.
+| Файл | Формат | Пример |
+|------|--------|--------|
+| `/opt/xray-vps-setup/routes/domains.txt` | Один домен на строку | `netflix.com`, `geosite:netflix`, `regexp:.*\.example$` |
+| `/opt/xray-vps-setup/routes/ips.txt` | IP или CIDR на строку | `8.8.8.8`, `1.0.0.0/24`, `geoip:us` |
 
-### Обновление geo-баз
+После редактирования — применить:
 
-Geo-базы (`geoip.dat`, `geosite.dat`) скачиваются из [Loyalsoldier/v2ray-rules-dat](https://github.com/Loyalsoldier/v2ray-rules-dat) при установке и **обновляются ежедневно** в полночь через cron-задачу на VPS2:
+```bash
+apply-routes.sh
+```
 
-- Скрипт: `/usr/local/bin/update-geodata.sh`
-- Лог: `/var/log/geodata-update.log`
-- XRay рестартует только при изменении файлов
-- Предыдущие версии сохраняются как `.bak`
+Скрипт пересобирает routing rules в XRay-конфиге и рестартует контейнер.
 
 ## Управление
 
@@ -195,11 +192,10 @@ docker compose -f /opt/xray-vps-setup/docker-compose.yml up -d
 # Логи:
 docker compose -f /opt/xray-vps-setup/docker-compose.yml logs -f
 
-# Ручное обновление geo-баз (VPS2):
-/usr/local/bin/update-geodata.sh
-
-# Проверка cron-задачи:
-crontab -l | grep geodata
+# Редактирование маршрутов (VPS2):
+nano /opt/xray-vps-setup/routes/domains.txt
+nano /opt/xray-vps-setup/routes/ips.txt
+apply-routes.sh
 ```
 
 ## Важные детали
@@ -211,4 +207,4 @@ crontab -l | grep geodata
 - `xPaddingBytes: 300-2000` — менее детектируемо, чем дефолтный диапазон 100-1000
 - VPS1 использует steal_oneself с собственным доменом; ACME сертификаты генерируются автоматически
 - **IPv6 полностью отключён** — sysctl на уровне ядра, `apt ForceIPv4`, все wget/curl с флагом `-4`, убраны IPv6-listener из Angie
-- WARP (опционально) — маршрутизирует российский трафик через Cloudflare WARP вместо прямого выхода
+- WARP (опционально) — весь трафик не из whitelist идёт через Cloudflare WARP вместо прямого выхода
