@@ -12,6 +12,9 @@ fi
 sysctl -w net.ipv6.conf.all.disable_ipv6=1 > /dev/null
 sysctl -w net.ipv6.conf.default.disable_ipv6=1 > /dev/null
 
+# Force apt to use IPv4 only
+echo 'Acquire::ForceIPv4 "true";' > /etc/apt/apt.conf.d/99force-ipv4
+
 # Install dependencies
 apt-get update
 apt-get install sudo idn dnsutils wamerican zip unzip python3 wget curl openssl gettext -y
@@ -24,7 +27,7 @@ TEMPLATE_URL="https://raw.githubusercontent.com/$GIT_REPO/refs/heads/$GIT_BRANCH
 
 fetch_template() {
   local content
-  content=$(wget -qO- "$TEMPLATE_URL/$1") || { echo "Failed to download template: $1"; exit 1; }
+  content=$(wget -4 -qO- "$TEMPLATE_URL/$1") || { echo "Failed to download template: $1"; exit 1; }
   [ -n "$content" ] || { echo "Template is empty: $1"; exit 1; }
   echo "$content"
 }
@@ -75,7 +78,7 @@ fi
 
 # Install Docker
 docker_install() {
-  curl -fsSL https://get.docker.com | sh
+  curl -4 -fsSL https://get.docker.com | sh
 }
 
 if ! command -v docker 2>&1 >/dev/null; then
@@ -89,8 +92,8 @@ export ARCH=$(dpkg --print-architecture)
 
 YQ_VERSION="v4.52.5"
 yq_install() {
-  wget -q "https://github.com/mikefarah/yq/releases/download/$YQ_VERSION/yq_linux_$ARCH" -O /usr/bin/yq
-  wget -qO /tmp/yq_checksums "https://github.com/mikefarah/yq/releases/download/$YQ_VERSION/checksums"
+  wget -4 -q "https://github.com/mikefarah/yq/releases/download/$YQ_VERSION/yq_linux_$ARCH" -O /usr/bin/yq
+  wget -4 -qO /tmp/yq_checksums "https://github.com/mikefarah/yq/releases/download/$YQ_VERSION/checksums"
   YQ_SHA256=$(grep "yq_linux_$ARCH " /tmp/yq_checksums | awk '{print $19}')
   echo "$YQ_SHA256  /usr/bin/yq" | sha256sum -c - || { echo "yq checksum verification failed"; rm -f /usr/bin/yq; exit 1; }
   chmod +x /usr/bin/yq
@@ -127,9 +130,9 @@ export MARZBAN_SUB_PATH=$(openssl rand -hex 8)
 # Download XRay core
 mkdir -p /opt/xray-vps-setup/marzban/xray-core
 if [[ "$ARCH" == "amd64" ]]; then
-  wget -O /tmp/xray.zip https://github.com/XTLS/Xray-core/releases/download/$XRAY_VERSION/Xray-linux-64.zip
+  wget -4 -O /tmp/xray.zip https://github.com/XTLS/Xray-core/releases/download/$XRAY_VERSION/Xray-linux-64.zip
 elif [[ "$ARCH" == "arm64" ]]; then
-  wget -O /tmp/xray.zip https://github.com/XTLS/Xray-core/releases/download/$XRAY_VERSION/Xray-linux-arm64-v8a.zip
+  wget -4 -O /tmp/xray.zip https://github.com/XTLS/Xray-core/releases/download/$XRAY_VERSION/Xray-linux-arm64-v8a.zip
 fi
 unzip -qo /tmp/xray.zip -d /opt/xray-vps-setup/marzban/xray-core
 

@@ -56,7 +56,6 @@ http {
     # No redirect to https — port 443 is not open on VPS1 (service on 49321)
     server {
         listen 80;
-        listen [::]:80;
 
         location / {
             root /tmp;

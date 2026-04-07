@@ -124,11 +124,12 @@ bash <(wget -qO- https://raw.githubusercontent.com/patronJS/mytests/refs/heads/m
 | Enter VPS1 short ID         | `VPS1_SHORT_ID` из вывода шага 2 |
 | Enter inter-VPS UUID        | `UUID_LINK` из вывода шага 2     |
 | Enter XHTTP path            | `XHTTP_PATH` из вывода шага 2    |
+| Enter VPS1 domain           | `VPS1_DOMAIN` из вывода шага 2   |
 
 Далее скрипт предложит опциональные настройки:
 
 - **SSH hardening** — создание пользователя, запрет root-входа, аутентификация по ключу, смена порта
-- **WARP** — маршрутизация российских сайтов через Cloudflare WARP
+- **WARP** — маршрутизация российских сайтов через Cloudflare WARP (вместо прямого выхода с VPS2)
 
 После завершения всё готово к работе — отдельный шаг для связывания серверов не нужен.
 
@@ -155,8 +156,34 @@ bash <(wget -qO- https://raw.githubusercontent.com/patronJS/mytests/refs/heads/m
 ## Потоки трафика
 
 ```
+# Зарубежный трафик — через цепочку VPS1
 VLESS-клиент  → VPS2:443   → XHTTP+REALITY → VPS1:49321 → Интернет
+
+# Российский трафик — напрямую с VPS2 (или через WARP)
+VLESS-клиент  → VPS2:443   → direct/WARP   → Российские сайты
 ```
+
+### Split routing (VPS2)
+
+Трафик на российские ресурсы не уходит в Германию — обрабатывается на VPS2:
+
+| Правило | Покрытие | Outbound |
+|---------|----------|----------|
+| `geosite:category-ru` + `regexp:*.ru/*.su/*.рф` | Российские домены | `direct` (или `warp`) |
+| `geoip:ru` | Российские IP-диапазоны (RIPE) | `direct` (или `warp`) |
+| `geoip:private` | Локальные сети | `direct` |
+| Всё остальное | Зарубежный трафик | `chain-vps1` |
+
+`domainStrategy: IPIfNonMatch` — если домен не совпал с geosite, XRay резолвит его в IP и проверяет geoip.
+
+### Обновление geo-баз
+
+Geo-базы (`geoip.dat`, `geosite.dat`) скачиваются из [Loyalsoldier/v2ray-rules-dat](https://github.com/Loyalsoldier/v2ray-rules-dat) при установке и **обновляются ежедневно** в полночь через cron-задачу на VPS2:
+
+- Скрипт: `/usr/local/bin/update-geodata.sh`
+- Лог: `/var/log/geodata-update.log`
+- XRay рестартует только при изменении файлов
+- Предыдущие версии сохраняются как `.bak`
 
 ## Управление
 
@@ -167,6 +194,12 @@ docker compose -f /opt/xray-vps-setup/docker-compose.yml up -d
 
 # Логи:
 docker compose -f /opt/xray-vps-setup/docker-compose.yml logs -f
+
+# Ручное обновление geo-баз (VPS2):
+/usr/local/bin/update-geodata.sh
+
+# Проверка cron-задачи:
+crontab -l | grep geodata
 ```
 
 ## Важные детали
@@ -177,4 +210,5 @@ docker compose -f /opt/xray-vps-setup/docker-compose.yml logs -f
 - `mode: packet-up` в chain outbound — предотвращает замораживание сессии TSPU при пакетах >15 KB
 - `xPaddingBytes: 300-2000` — менее детектируемо, чем дефолтный диапазон 100-1000
 - VPS1 использует steal_oneself с собственным доменом; ACME сертификаты генерируются автоматически
-- IPv6 необходимо отключить до запуска скриптов
+- **IPv6 полностью отключён** — sysctl на уровне ядра, `apt ForceIPv4`, все wget/curl с флагом `-4`, убраны IPv6-listener из Angie
+- WARP (опционально) — маршрутизирует российский трафик через Cloudflare WARP вместо прямого выхода

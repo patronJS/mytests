@@ -12,6 +12,9 @@ fi
 sysctl -w net.ipv6.conf.all.disable_ipv6=1 > /dev/null
 sysctl -w net.ipv6.conf.default.disable_ipv6=1 > /dev/null
 
+# Force apt to use IPv4 only
+echo 'Acquire::ForceIPv4 "true";' > /etc/apt/apt.conf.d/99force-ipv4
+
 # Install dependencies
 apt-get update
 apt-get install idn sudo dnsutils wamerican zip unzip python3 wget curl openssl gettext -y
@@ -24,7 +27,7 @@ TEMPLATE_URL="https://raw.githubusercontent.com/$GIT_REPO/refs/heads/$GIT_BRANCH
 
 fetch_template() {
   local content
-  content=$(wget -qO- "$TEMPLATE_URL/$1") || { echo "Failed to download template: $1"; exit 1; }
+  content=$(wget -4 -qO- "$TEMPLATE_URL/$1") || { echo "Failed to download template: $1"; exit 1; }
   [ -n "$content" ] || { echo "Template is empty: $1"; exit 1; }
   echo "$content"
 }
@@ -110,7 +113,7 @@ fi
 configure_warp_input="n"
 read -ep "Do you want WARP for Russian sites? [y/N] "$'\n' configure_warp_input
 if [[ ${configure_warp_input,,} == "y" ]]; then
-  if ! curl -I https://api.cloudflareclient.com --connect-timeout 10 > /dev/null 2>&1; then
+  if ! curl -4 -I https://api.cloudflareclient.com --connect-timeout 10 > /dev/null 2>&1; then
     echo "Warp can't be used"
     configure_warp_input="n"
   fi
@@ -118,7 +121,7 @@ fi
 
 # Install Docker
 docker_install() {
-  curl -fsSL https://get.docker.com | sh
+  curl -4 -fsSL https://get.docker.com | sh
 }
 
 if ! command -v docker 2>&1 >/dev/null; then
@@ -132,8 +135,8 @@ export ARCH=$(dpkg --print-architecture)
 
 YQ_VERSION="v4.52.5"
 yq_install() {
-  wget -q "https://github.com/mikefarah/yq/releases/download/$YQ_VERSION/yq_linux_$ARCH" -O /usr/bin/yq
-  wget -qO /tmp/yq_checksums "https://github.com/mikefarah/yq/releases/download/$YQ_VERSION/checksums"
+  wget -4 -q "https://github.com/mikefarah/yq/releases/download/$YQ_VERSION/yq_linux_$ARCH" -O /usr/bin/yq
+  wget -4 -qO /tmp/yq_checksums "https://github.com/mikefarah/yq/releases/download/$YQ_VERSION/checksums"
   YQ_SHA256=$(grep "yq_linux_$ARCH " /tmp/yq_checksums | awk '{print $19}')
   echo "$YQ_SHA256  /usr/bin/yq" | sha256sum -c - || { echo "yq checksum verification failed"; rm -f /usr/bin/yq; exit 1; }
   chmod +x /usr/bin/yq
@@ -170,11 +173,28 @@ export MARZBAN_SUB_PATH=$(openssl rand -hex 8)
 # Download XRay core
 mkdir -p /opt/xray-vps-setup/node/xray-core
 if [[ "$ARCH" == "amd64" ]]; then
-  wget -O /tmp/xray.zip https://github.com/XTLS/Xray-core/releases/download/$XRAY_VERSION/Xray-linux-64.zip
+  wget -4 -O /tmp/xray.zip https://github.com/XTLS/Xray-core/releases/download/$XRAY_VERSION/Xray-linux-64.zip
 elif [[ "$ARCH" == "arm64" ]]; then
-  wget -O /tmp/xray.zip https://github.com/XTLS/Xray-core/releases/download/$XRAY_VERSION/Xray-linux-arm64-v8a.zip
+  wget -4 -O /tmp/xray.zip https://github.com/XTLS/Xray-core/releases/download/$XRAY_VERSION/Xray-linux-arm64-v8a.zip
 fi
 unzip -qo /tmp/xray.zip -d /opt/xray-vps-setup/node/xray-core
+
+# Download updated geo databases (better Russian IP/domain coverage)
+echo "Downloading updated geoip.dat and geosite.dat..."
+if wget -4 -qO /tmp/geoip.dat "https://github.com/Loyalsoldier/v2ray-rules-dat/releases/latest/download/geoip.dat" && [ -s /tmp/geoip.dat ]; then
+  mv /tmp/geoip.dat /opt/xray-vps-setup/node/xray-core/geoip.dat
+  echo "  geoip.dat updated"
+else
+  echo "  Warning: failed to download geoip.dat, using bundled"
+  rm -f /tmp/geoip.dat
+fi
+if wget -4 -qO /tmp/geosite.dat "https://github.com/Loyalsoldier/v2ray-rules-dat/releases/latest/download/geosite.dat" && [ -s /tmp/geosite.dat ]; then
+  mv /tmp/geosite.dat /opt/xray-vps-setup/node/xray-core/geosite.dat
+  echo "  geosite.dat updated"
+else
+  echo "  Warning: failed to download geosite.dat, using bundled"
+  rm -f /tmp/geosite.dat
+fi
 
 # Download and envsubst templates
 mkdir -p /opt/xray-vps-setup/node
@@ -213,13 +233,13 @@ fi
 
 # Update panel default host
 echo "Updating panel host with domain $VLESS_DOMAIN..."
-PANEL_TOKEN=$(curl -sf -X POST "https://$VLESS_DOMAIN/api/admin/token" \
+PANEL_TOKEN=$(curl -4 -sf -X POST "https://$VLESS_DOMAIN/api/admin/token" \
   -H "Content-Type: application/x-www-form-urlencoded" \
   --data-urlencode "username=$MARZBAN_USER" \
   --data-urlencode "password=$MARZBAN_PASS" \
   | python3 -c "import json,sys; print(json.load(sys.stdin)['access_token'])" || echo "")
 if [[ -n "$PANEL_TOKEN" && "$PANEL_TOKEN" != "null" ]]; then
-  PHOSTS_HTTP=$(curl -s -o /tmp/panel_hosts.json -w "%{http_code}" \
+  PHOSTS_HTTP=$(curl -4 -s -o /tmp/panel_hosts.json -w "%{http_code}" \
     "https://$VLESS_DOMAIN/api/hosts" \
     -H "Authorization: Bearer $PANEL_TOKEN" || echo "000")
   if [[ "$PHOSTS_HTTP" == "200" ]]; then
@@ -235,7 +255,7 @@ for host_list in hosts.values():
         host['sni'] = domain
 print(json.dumps(hosts))
 PYEOF
-    curl -s -o /dev/null \
+    curl -4 -s -o /dev/null \
       -X PUT "https://$VLESS_DOMAIN/api/hosts" \
       -H "Authorization: Bearer $PANEL_TOKEN" \
       -H "Content-Type: application/json" \
@@ -312,34 +332,80 @@ fi
 warp_install() {
   apt install gpg -y
   echo "If this fails then warp won't be added to routing and everything will work without it"
-  curl -fsSL https://pkg.cloudflareclient.com/pubkey.gpg | gpg --yes --dearmor --output /usr/share/keyrings/cloudflare-warp-archive-keyring.gpg
+  curl -4 -fsSL https://pkg.cloudflareclient.com/pubkey.gpg | gpg --yes --dearmor --output /usr/share/keyrings/cloudflare-warp-archive-keyring.gpg
   echo "deb [signed-by=/usr/share/keyrings/cloudflare-warp-archive-keyring.gpg] https://pkg.cloudflareclient.com/ $(. /etc/os-release && echo $VERSION_CODENAME) main" | tee /etc/apt/sources.list.d/cloudflare-client.list
   apt update
   apt install cloudflare-warp -y
 
-  echo "y" | warp-cli registration new
-  TRY_WARP=$?
-  if [[ $TRY_WARP != 0 ]]; then
-    echo "Couldn't connect to WARP"
-    exit 0
-  else
-    warp-cli mode proxy
-    warp-cli proxy port 40000
-    warp-cli connect
-    export XRAY_CONFIG_WARP="/opt/xray-vps-setup/node/xray_config.json"
-    yq eval \
+  if ! echo "y" | warp-cli registration new; then
+    echo "Couldn't connect to WARP, continuing without it"
+    return 0
+  fi
+  if ! warp-cli mode proxy || ! warp-cli proxy port 40000 || ! warp-cli connect; then
+    echo "WARP setup failed, continuing without it"
+    return 0
+  fi
+  XRAY_CONFIG_WARP="/opt/xray-vps-setup/node/xray_config.json"
+  # Add WARP SOCKS outbound and switch RU rules from direct → warp
+  if yq eval \
     '.outbounds += {"tag": "warp","protocol": "socks","settings": {"servers": [{"address": "127.0.0.1","port": 40000}]}}' \
-    -i $XRAY_CONFIG_WARP
-    yq eval \
-    '.routing.rules += {"outboundTag": "warp", "domain": ["geosite:category-ru", "regexp:.*\\.xn--$", "regexp:.*\\.ru$", "regexp:.*\\.su$"]}' \
-    -i $XRAY_CONFIG_WARP
-    docker compose -f /opt/xray-vps-setup/docker-compose.yml down && docker compose -f /opt/xray-vps-setup/docker-compose.yml up -d
+    -i "$XRAY_CONFIG_WARP" && \
+     yq eval '(.routing.rules[] | select(.domain != null and (.domain[] | test("category-ru")))).outboundTag = "warp"' -i "$XRAY_CONFIG_WARP" && \
+     yq eval '(.routing.rules[] | select(.ip != null and (.ip[] | test("geoip:ru")))).outboundTag = "warp"' -i "$XRAY_CONFIG_WARP"; then
+    docker compose -f /opt/xray-vps-setup/docker-compose.yml restart
+    echo "WARP enabled for Russian traffic"
+  else
+    echo "Warning: failed to patch XRay config for WARP, continuing without it"
   fi
 }
 
 if [[ ${configure_warp_input,,} == "y" ]]; then
   warp_install
 fi
+
+# Install daily geo database update cron job (runs at midnight)
+cat > /usr/local/bin/update-geodata.sh << 'GEODATA_EOF'
+#!/bin/bash
+set -euo pipefail
+PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+XRAY_DIR="/opt/xray-vps-setup/node/xray-core"
+UPDATED=false
+for file in geoip.dat geosite.dat; do
+  if wget -4 -qO "/tmp/$file.new" "https://github.com/Loyalsoldier/v2ray-rules-dat/releases/latest/download/$file" && [ -s "/tmp/$file.new" ]; then
+    if ! cmp -s "/tmp/$file.new" "$XRAY_DIR/$file"; then
+      cp "$XRAY_DIR/$file" "$XRAY_DIR/$file.bak" 2>/dev/null || true
+      mv "/tmp/$file.new" "$XRAY_DIR/$file"
+      UPDATED=true
+    else
+      rm -f "/tmp/$file.new"
+    fi
+  else
+    rm -f "/tmp/$file.new"
+  fi
+done
+if [ "$UPDATED" = true ]; then
+  echo "$(date '+%Y-%m-%d %H:%M:%S') Geo databases updated, restarting marzban"
+  docker compose -f /opt/xray-vps-setup/docker-compose.yml restart marzban
+else
+  echo "$(date '+%Y-%m-%d %H:%M:%S') Geo databases unchanged, no restart needed"
+fi
+GEODATA_EOF
+chmod +x /usr/local/bin/update-geodata.sh
+
+# Register cron job (exact match to avoid removing unrelated entries)
+CRON_LINE="0 0 * * * /usr/local/bin/update-geodata.sh >> /var/log/geodata-update.log 2>&1"
+(crontab -l 2>/dev/null | grep -vF "$CRON_LINE"; echo "$CRON_LINE") | crontab -
+
+# Logrotate for geodata update log
+cat > /etc/logrotate.d/geodata-update << 'LOGROTATE_EOF'
+/var/log/geodata-update.log {
+    monthly
+    rotate 3
+    compress
+    missingok
+    notifempty
+}
+LOGROTATE_EOF
 
 # Cleanup temp files
 rm -f /tmp/panel_hosts.json /tmp/panel_hosts_updated.json /tmp/xray.zip
