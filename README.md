@@ -77,9 +77,9 @@ bash <(wget -qO- https://raw.githubusercontent.com/patronJS/mytests/refs/heads/m
 
 Скрипт задаст вопрос:
 
-| Вопрос           | Значение            |
-| ---------------- | ------------------- |
-| Enter your domain | Домен для VPS1      |
+| Вопрос            | Значение       |
+| ----------------- | -------------- |
+| Enter your domain | Домен для VPS1 |
 
 Устанавливает Docker, XRay, Marzban, Angie. Генерирует ключи x25519, UUID, рандомные пути.
 
@@ -169,10 +169,25 @@ VLESS-клиент  → VPS2:443   → direct/WARP   → Интернет (ро�
 
 Управление маршрутами — два текстовых файла на VPS2:
 
-| Файл | Формат | Пример |
-|------|--------|--------|
-| `/opt/xray-vps-setup/routes/domains.txt` | Один домен на строку | `netflix.com`, `geosite:netflix`, `regexp:.*\.example$` |
-| `/opt/xray-vps-setup/routes/ips.txt` | IP или CIDR на строку | `8.8.8.8`, `1.0.0.0/24`, `geoip:us` |
+| Файл                                     | Формат                | Пример                                                  |
+| ---------------------------------------- | --------------------- | ------------------------------------------------------- |
+| `/opt/xray-vps-setup/routes/domains.txt` | Один домен на строку  | `netflix.com`, `geosite:netflix`, `regexp:.*\.example$` |
+| `/opt/xray-vps-setup/routes/ips.txt`     | IP или CIDR на строку | `8.8.8.8`, `1.0.0.0/24`, `geoip:us`                     |
+
+в файле /opt/xray-vps-setup/routes/domains.txt
+
+geosite:google
+geosite:openai
+geosite:docker
+geosite:github
+geosite:anthropic
+geosite:npmjs
+geosite:perplexity
+
+ip.me
+openrouter.ai
+
+Далее отдельно Telegram, Instagram (списки берем тут https://github.com/v2fly/domain-list-community)
 
 После редактирования — применить:
 

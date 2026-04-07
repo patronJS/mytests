@@ -197,6 +197,28 @@ iptables_add OUTPUT -o lo -j ACCEPT
 iptables -P INPUT DROP
 netfilter-persistent save
 
+# Create update-geodata.sh helper
+cat > /usr/local/bin/update-geodata.sh << 'GEODATA_EOF'
+#!/bin/bash
+set -euo pipefail
+XRAY_DIR="/opt/xray-vps-setup/marzban/xray-core"
+
+echo "Downloading latest geosite.dat..."
+wget -4 -qO "$XRAY_DIR/geosite.dat" \
+  https://github.com/v2fly/domain-list-community/releases/latest/download/dlc.dat
+
+echo "Downloading latest geoip.dat..."
+wget -4 -qO "$XRAY_DIR/geoip.dat" \
+  https://github.com/v2fly/geoip/releases/latest/download/geoip.dat
+
+docker compose -f /opt/xray-vps-setup/docker-compose.yml restart marzban
+echo "geodata updated, XRay restarted"
+GEODATA_EOF
+chmod +x /usr/local/bin/update-geodata.sh
+
+# Schedule weekly geodata update (Monday 4:00 AM)
+(crontab -l 2>/dev/null | grep -v 'update-geodata'; echo "0 4 * * 1 /usr/local/bin/update-geodata.sh >/dev/null 2>&1") | crontab -
+
 # Cleanup temp files
 rm -f /tmp/xray.zip
 
@@ -215,4 +237,8 @@ echo " VPS1_SHORT_ID:   $SHORT_ID"
 echo " UUID_LINK:       $UUID_LINK"
 echo " XHTTP_PATH:      $XHTTP_PATH"
 echo " VPS1_DOMAIN:      $VPS1_DOMAIN"
+echo ""
+echo " === Geodata ==="
+echo " geosite.dat/geoip.dat auto-update: weekly (Mon 4:00 AM)"
+echo " Manual update: update-geodata.sh"
 echo "========================================="

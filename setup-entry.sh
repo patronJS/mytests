@@ -441,6 +441,28 @@ echo "XRay restarted with updated routes"
 APPLYSCRIPT_EOF
 chmod +x /usr/local/bin/apply-routes.sh
 
+# Create update-geodata.sh helper
+cat > /usr/local/bin/update-geodata.sh << 'GEODATA_EOF'
+#!/bin/bash
+set -euo pipefail
+XRAY_DIR="/opt/xray-vps-setup/node/xray-core"
+
+echo "Downloading latest geosite.dat..."
+wget -4 -qO "$XRAY_DIR/geosite.dat" \
+  https://github.com/v2fly/domain-list-community/releases/latest/download/dlc.dat
+
+echo "Downloading latest geoip.dat..."
+wget -4 -qO "$XRAY_DIR/geoip.dat" \
+  https://github.com/v2fly/geoip/releases/latest/download/geoip.dat
+
+docker compose -f /opt/xray-vps-setup/docker-compose.yml restart marzban
+echo "geodata updated, XRay restarted"
+GEODATA_EOF
+chmod +x /usr/local/bin/update-geodata.sh
+
+# Schedule weekly geodata update (Monday 4:00 AM)
+(crontab -l 2>/dev/null | grep -v 'update-geodata'; echo "0 4 * * 1 /usr/local/bin/update-geodata.sh >/dev/null 2>&1") | crontab -
+
 # Cleanup temp files
 rm -f /tmp/panel_hosts.json /tmp/panel_hosts_updated.json /tmp/xray.zip
 
@@ -458,6 +480,10 @@ echo " To route specific sites through VPS1 (Germany):"
 echo "   1. Edit /opt/xray-vps-setup/routes/domains.txt"
 echo "   2. Edit /opt/xray-vps-setup/routes/ips.txt"
 echo "   3. Run: apply-routes.sh"
+echo ""
+echo " === Geodata ==="
+echo " geosite.dat/geoip.dat auto-update: weekly (Mon 4:00 AM)"
+echo " Manual update: update-geodata.sh"
 echo ""
 echo " === Next steps ==="
 echo " 1. Connect via SSH tunnel and open Marzban panel"
