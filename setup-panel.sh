@@ -136,6 +136,13 @@ elif [[ "$ARCH" == "arm64" ]]; then
 fi
 unzip -qo /tmp/xray.zip -d /opt/xray-vps-setup/marzban/xray-core
 
+# Download latest geodata (geosite.dat from XRay release may be outdated)
+echo "Downloading latest geosite.dat and geoip.dat..."
+wget -4 -qO /opt/xray-vps-setup/marzban/xray-core/geosite.dat \
+  https://github.com/v2fly/domain-list-community/releases/latest/download/dlc.dat
+wget -4 -qO /opt/xray-vps-setup/marzban/xray-core/geoip.dat \
+  https://github.com/v2fly/geoip/releases/latest/download/geoip.dat
+
 # Download and envsubst templates
 mkdir -p /opt/xray-vps-setup/marzban
 cd /opt/xray-vps-setup
