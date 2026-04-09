@@ -39,7 +39,7 @@ export VLESS_DOMAIN=$(echo "$input_domain" | idn)
 
 SERVER_IPS=($(hostname -I))
 
-RESOLVED_IP=$(dig +short $VLESS_DOMAIN | tail -n1)
+RESOLVED_IP=$(dig +short "$VLESS_DOMAIN" | tail -n1)
 
 if [ -z "$RESOLVED_IP" ]; then
   echo "Warning: Domain has no DNS record"
@@ -97,21 +97,23 @@ read -ep "Do you want to harden SSH? [y/N] "$'\n' configure_ssh_input
 if [[ ${configure_ssh_input,,} == "y" ]]; then
   read -ep "Enter SSH port. Default 22, can't use ports: 80, 443 and 4123:"$'\n' input_ssh_port
 
-  while ! [[ "$input_ssh_port" =~ ^[0-9]+$ ]] || [[ "$input_ssh_port" -eq 80 || "$input_ssh_port" -eq 443 || "$input_ssh_port" -eq 4123 ]]; do
-    read -ep "Invalid or reserved port ($input_ssh_port), write again:"$'\n' input_ssh_port
+  while ! [[ "$input_ssh_port" =~ ^[0-9]+$ ]] || (( input_ssh_port < 1 || input_ssh_port > 65535 )) || [[ "$input_ssh_port" -eq 80 || "$input_ssh_port" -eq 443 || "$input_ssh_port" -eq 4123 ]]; do
+    read -ep "Invalid or reserved port ($input_ssh_port). Use 1-65535, not 80/443/4123:"$'\n' input_ssh_port
   done
 
   read -ep "Enter SSH public key:"$'\n' input_ssh_pbk
-  echo "$input_ssh_pbk" > ./test_pbk
-  if ! ssh-keygen -l -f ./test_pbk; then
+  ssh_key_tmp=$(mktemp)
+  echo "$input_ssh_pbk" > "$ssh_key_tmp"
+  if ! ssh-keygen -l -f "$ssh_key_tmp"; then
+    rm -f "$ssh_key_tmp"
     echo "Can't verify the public key. Try again and make sure to include 'ssh-rsa' or 'ssh-ed25519' followed by 'user@pcname' at the end of the file."
     exit 1
   fi
-  rm ./test_pbk
+  rm -f "$ssh_key_tmp"
 fi
 
 configure_warp_input="n"
-read -ep "Do you want WARP for Russian sites? [y/N] "$'\n' configure_warp_input
+read -ep "Enable WARP? (hides VPS2 IP, routes default traffic via Cloudflare) [y/N] "$'\n' configure_warp_input
 if [[ ${configure_warp_input,,} == "y" ]]; then
   if ! curl -4 -I https://api.cloudflareclient.com --connect-timeout 10 > /dev/null 2>&1; then
     echo "Warp can't be used"
@@ -154,28 +156,57 @@ grep -q "net.ipv6.conf.all.disable_ipv6" /etc/sysctl.conf || echo "net.ipv6.conf
 grep -q "net.ipv6.conf.default.disable_ipv6" /etc/sysctl.conf || echo "net.ipv6.conf.default.disable_ipv6=1" >> /etc/sysctl.conf
 sysctl -p > /dev/null
 
-# Generate local secrets
-export XRAY_PIK=$(docker run --rm ghcr.io/xtls/xray-core:${XRAY_VERSION#v} x25519 | grep 'PrivateKey' | awk '{print $NF}')
-export XRAY_PBK=$(docker run --rm ghcr.io/xtls/xray-core:${XRAY_VERSION#v} x25519 -i "$XRAY_PIK" | grep 'PublicKey' | awk '{print $NF}')
-export SID1=$(openssl rand -hex 2)
-export SID2=$(openssl rand -hex 4)
-export SID3=$(openssl rand -hex 6)
-export SID4=$(openssl rand -hex 8)
-export SHORT_IDS="\"$SID1\",\"$SID2\",\"$SID3\",\"$SID4\""
-export SHORT_ID=$SID4
-export CLIENT_UUID=$(docker run --rm ghcr.io/xtls/xray-core:${XRAY_VERSION#v} uuid)
-export CLIENT_XHTTP_PATH=$(openssl rand -hex 12)
-export MARZBAN_USER=$(grep -E '^[a-z]{4,6}$' /usr/share/dict/words | shuf -n 1)
-export MARZBAN_PASS=$(tr -dc A-Za-z0-9 </dev/urandom | head -c 13; echo)
-export MARZBAN_PATH=$(openssl rand -hex 8)
-export MARZBAN_SUB_PATH=$(openssl rand -hex 8)
+# Generate local secrets (reuse existing on rerun)
+SECRETS_FILE="/opt/xray-vps-setup/.secrets.env"
+if [[ -f "$SECRETS_FILE" ]]; then
+  echo "Existing install detected — reusing secrets from $SECRETS_FILE"
+  # shellcheck disable=SC1090
+  source "$SECRETS_FILE"
+else
+  export XRAY_PIK=$(docker run --rm ghcr.io/xtls/xray-core:${XRAY_VERSION#v} x25519 | grep 'PrivateKey' | awk '{print $NF}')
+  export XRAY_PBK=$(docker run --rm ghcr.io/xtls/xray-core:${XRAY_VERSION#v} x25519 -i "$XRAY_PIK" | grep 'PublicKey' | awk '{print $NF}')
+  export SID1=$(openssl rand -hex 2)
+  export SID2=$(openssl rand -hex 4)
+  export SID3=$(openssl rand -hex 6)
+  export SID4=$(openssl rand -hex 8)
+  export SHORT_IDS="\"$SID1\",\"$SID2\",\"$SID3\",\"$SID4\""
+  export SHORT_ID=$SID4
+  export CLIENT_UUID=$(docker run --rm ghcr.io/xtls/xray-core:${XRAY_VERSION#v} uuid)
+  export CLIENT_XHTTP_PATH=$(openssl rand -hex 12)
+  export MARZBAN_USER=$(grep -E '^[a-z]{4,6}$' /usr/share/dict/words | shuf -n 1)
+  export MARZBAN_PASS=$(tr -dc A-Za-z0-9 </dev/urandom | head -c 13; echo)
+  export MARZBAN_PATH=$(openssl rand -hex 8)
+  export MARZBAN_SUB_PATH=$(openssl rand -hex 8)
+
+  mkdir -p /opt/xray-vps-setup
+  cat > "$SECRETS_FILE" << EOF
+export XRAY_PIK="$XRAY_PIK"
+export XRAY_PBK="$XRAY_PBK"
+export SID1="$SID1"
+export SID2="$SID2"
+export SID3="$SID3"
+export SID4="$SID4"
+export SHORT_IDS="$SHORT_IDS"
+export SHORT_ID="$SHORT_ID"
+export CLIENT_UUID="$CLIENT_UUID"
+export CLIENT_XHTTP_PATH="$CLIENT_XHTTP_PATH"
+export MARZBAN_USER="$MARZBAN_USER"
+export MARZBAN_PASS="$MARZBAN_PASS"
+export MARZBAN_PATH="$MARZBAN_PATH"
+export MARZBAN_SUB_PATH="$MARZBAN_SUB_PATH"
+EOF
+  chmod 600 "$SECRETS_FILE"
+fi
 
 # Download XRay core
 mkdir -p /opt/xray-vps-setup/node/xray-core
 if [[ "$ARCH" == "amd64" ]]; then
-  wget -4 -O /tmp/xray.zip https://github.com/XTLS/Xray-core/releases/download/$XRAY_VERSION/Xray-linux-64.zip
+  wget -4 -O /tmp/xray.zip "https://github.com/XTLS/Xray-core/releases/download/$XRAY_VERSION/Xray-linux-64.zip"
 elif [[ "$ARCH" == "arm64" ]]; then
-  wget -4 -O /tmp/xray.zip https://github.com/XTLS/Xray-core/releases/download/$XRAY_VERSION/Xray-linux-arm64-v8a.zip
+  wget -4 -O /tmp/xray.zip "https://github.com/XTLS/Xray-core/releases/download/$XRAY_VERSION/Xray-linux-arm64-v8a.zip"
+else
+  echo "Unsupported architecture: $ARCH (only amd64 and arm64 are supported)"
+  exit 1
 fi
 unzip -qo /tmp/xray.zip -d /opt/xray-vps-setup/node/xray-core
 
@@ -223,14 +254,14 @@ fi
 
 # Update panel default host
 echo "Updating panel host with domain $VLESS_DOMAIN..."
-PANEL_TOKEN=$(curl -4 -sf -X POST "https://$VLESS_DOMAIN/api/admin/token" \
+PANEL_TOKEN=$(curl -4 -sf -X POST "http://127.0.0.1:8000/${MARZBAN_PATH}/api/admin/token" \
   -H "Content-Type: application/x-www-form-urlencoded" \
   --data-urlencode "username=$MARZBAN_USER" \
   --data-urlencode "password=$MARZBAN_PASS" \
   | python3 -c "import json,sys; print(json.load(sys.stdin)['access_token'])" || echo "")
 if [[ -n "$PANEL_TOKEN" && "$PANEL_TOKEN" != "null" ]]; then
   PHOSTS_HTTP=$(curl -4 -s -o /tmp/panel_hosts.json -w "%{http_code}" \
-    "https://$VLESS_DOMAIN/api/hosts" \
+    "http://127.0.0.1:8000/${MARZBAN_PATH}/api/hosts" \
     -H "Authorization: Bearer $PANEL_TOKEN" || echo "000")
   if [[ "$PHOSTS_HTTP" == "200" ]]; then
     export PANEL_HOST_DOMAIN="$VLESS_DOMAIN"
@@ -246,7 +277,7 @@ for host_list in hosts.values():
 print(json.dumps(hosts))
 PYEOF
     curl -4 -s -o /dev/null \
-      -X PUT "https://$VLESS_DOMAIN/api/hosts" \
+      -X PUT "http://127.0.0.1:8000/${MARZBAN_PATH}/api/hosts" \
       -H "Authorization: Bearer $PANEL_TOKEN" \
       -H "Content-Type: application/json" \
       -d @/tmp/panel_hosts_updated.json || true
@@ -300,16 +331,16 @@ sshd_edit() {
 }
 
 add_user() {
-  useradd $SSH_USER -s /bin/bash
-  usermod -aG sudo $SSH_USER
-  echo $SSH_USER:$SSH_USER_PASS | chpasswd
-  mkdir -p /home/$SSH_USER/.ssh
-  touch /home/$SSH_USER/.ssh/authorized_keys
-  echo $input_ssh_pbk >> /home/$SSH_USER/.ssh/authorized_keys
-  chmod 700 /home/$SSH_USER/.ssh/
-  chmod 600 /home/$SSH_USER/.ssh/authorized_keys
-  chown $SSH_USER:$SSH_USER -R /home/$SSH_USER
-  usermod -aG docker $SSH_USER
+  id "$SSH_USER" &>/dev/null || useradd "$SSH_USER" -s /bin/bash
+  usermod -aG sudo "$SSH_USER"
+  echo "$SSH_USER:$SSH_USER_PASS" | chpasswd
+  mkdir -p "/home/$SSH_USER/.ssh"
+  touch "/home/$SSH_USER/.ssh/authorized_keys"
+  grep -qF "$input_ssh_pbk" "/home/$SSH_USER/.ssh/authorized_keys" 2>/dev/null || echo "$input_ssh_pbk" >> "/home/$SSH_USER/.ssh/authorized_keys"
+  chmod 700 "/home/$SSH_USER/.ssh/"
+  chmod 600 "/home/$SSH_USER/.ssh/authorized_keys"
+  chown "$SSH_USER:$SSH_USER" -R "/home/$SSH_USER"
+  usermod -aG docker "$SSH_USER"
 }
 
 if [[ ${configure_ssh_input,,} == "y" ]]; then
@@ -320,41 +351,90 @@ fi
 
 # WARP install
 warp_install() {
-  apt install gpg -y
-  echo "If this fails then warp won't be added to routing and everything will work without it"
-  curl -4 -fsSL https://pkg.cloudflareclient.com/pubkey.gpg | gpg --yes --dearmor --output /usr/share/keyrings/cloudflare-warp-archive-keyring.gpg
-  echo "deb [signed-by=/usr/share/keyrings/cloudflare-warp-archive-keyring.gpg] https://pkg.cloudflareclient.com/ $(. /etc/os-release && echo $VERSION_CODENAME) main" | tee /etc/apt/sources.list.d/cloudflare-client.list
-  apt update
-  apt install cloudflare-warp -y
+  # Run in subshell-like guard so set -e doesn't kill the main script
+  _warp_install_inner || { echo "WARP setup failed, continuing without it"; return 0; }
+}
 
-  if ! echo "y" | warp-cli registration new; then
-    echo "Couldn't connect to WARP, continuing without it"
-    return 0
+_warp_install_inner() {
+  apt install gpg -y
+  echo "Installing Cloudflare WARP..."
+  curl -4 -fsSL https://pkg.cloudflareclient.com/pubkey.gpg | gpg --yes --dearmor --output /usr/share/keyrings/cloudflare-warp-archive-keyring.gpg
+  mkdir -p /etc/apt/sources.list.d
+  echo "deb [signed-by=/usr/share/keyrings/cloudflare-warp-archive-keyring.gpg] https://pkg.cloudflareclient.com/ $(. /etc/os-release && echo $VERSION_CODENAME) main" > /etc/apt/sources.list.d/cloudflare-client.list
+  apt update
+  if ! apt install cloudflare-warp -y; then
+    echo "Failed to install cloudflare-warp package"
+    return 1
   fi
-  if ! warp-cli mode proxy || ! warp-cli proxy port 40000 || ! warp-cli connect; then
-    echo "WARP setup failed, continuing without it"
-    return 0
+
+  # Idempotent registration: reuse existing or create new
+  if warp-cli status 2>/dev/null | grep -q "Registration Missing"; then
+    if ! echo "y" | warp-cli registration new; then
+      echo "Couldn't register WARP"
+      return 1
+    fi
   fi
-  XRAY_CONFIG_WARP="/opt/xray-vps-setup/node/xray_config.json"
-  # Add WARP SOCKS outbound and switch default catch-all from direct → warp
-  if yq eval \
+  # Always enforce desired state regardless of prior runs
+  if ! warp-cli mode proxy || ! warp-cli proxy port 40000; then
+    echo "WARP client configuration failed"
+    return 1
+  fi
+  if ! warp-cli status 2>/dev/null | grep -q "Connected"; then
+    if ! timeout 30 warp-cli connect; then
+      echo "WARP connect timed out"
+      return 1
+    fi
+  fi
+
+  local XRAY_CONFIG_WARP="/opt/xray-vps-setup/node/xray_config.json"
+  local backup
+  backup=$(mktemp "${XRAY_CONFIG_WARP}.bak.XXXXXX")
+  cp "$XRAY_CONFIG_WARP" "$backup"
+
+  # Upsert WARP SOCKS outbound: remove old if present, then add correct one
+  yq eval 'del(.outbounds[] | select(.tag == "warp"))' -i "$XRAY_CONFIG_WARP"
+  yq eval \
     '.outbounds += {"tag": "warp","protocol": "socks","settings": {"servers": [{"address": "127.0.0.1","port": 40000}]}}' \
-    -i "$XRAY_CONFIG_WARP" && \
-     yq eval '(.routing.rules[] | select(.inboundTag != null)).outboundTag = "warp"' -i "$XRAY_CONFIG_WARP"; then
-    docker compose -f /opt/xray-vps-setup/docker-compose.yml restart
-    echo "WARP enabled as default outbound"
-  else
-    echo "Warning: failed to patch XRay config for WARP, continuing without it"
+    -i "$XRAY_CONFIG_WARP"
+
+  # Switch catch-all inbound rule from direct → warp
+  yq eval \
+    '(.routing.rules[] | select(.outboundTag == "direct") | select(.inboundTag != null)).outboundTag = "warp"' \
+    -i "$XRAY_CONFIG_WARP"
+
+  # Verify the patch actually took effect
+  local patched
+  patched=$(yq eval '.routing.rules[] | select(.inboundTag != null) | .outboundTag' "$XRAY_CONFIG_WARP")
+  if [[ "$patched" != "warp" ]]; then
+    echo "XRay config patch did not apply correctly, rolling back"
+    cp "$backup" "$XRAY_CONFIG_WARP"
+    warp-cli disconnect 2>/dev/null || true
+    warp-cli registration delete 2>/dev/null || true
+    rm -f "$backup"
+    return 1
   fi
+
+  # Restart XRay with rollback on failure
+  if ! docker compose -f /opt/xray-vps-setup/docker-compose.yml restart; then
+    echo "Docker restart failed, rolling back XRay config"
+    cp "$backup" "$XRAY_CONFIG_WARP"
+    docker compose -f /opt/xray-vps-setup/docker-compose.yml restart 2>/dev/null || true
+    rm -f "$backup"
+    return 1
+  fi
+
+  rm -f "$backup"
+  echo "WARP enabled as default outbound"
 }
 
 if [[ ${configure_warp_input,,} == "y" ]]; then
   warp_install
 fi
 
-# Create route files for whitelist-based routing
+# Create route files for whitelist-based routing (preserve existing on rerun)
 mkdir -p /opt/xray-vps-setup/routes
-cat > /opt/xray-vps-setup/routes/domains.txt << 'ROUTES_EOF'
+if [[ ! -f /opt/xray-vps-setup/routes/domains.txt ]]; then
+  cat > /opt/xray-vps-setup/routes/domains.txt << 'ROUTES_EOF'
 # Domains to route through VPS1 (Germany)
 # One per line. Subdomains included automatically.
 # Supported formats:
@@ -369,8 +449,10 @@ cat > /opt/xray-vps-setup/routes/domains.txt << 'ROUTES_EOF'
 # spotify.com
 # openai.com
 ROUTES_EOF
+fi
 
-cat > /opt/xray-vps-setup/routes/ips.txt << 'ROUTES_EOF'
+if [[ ! -f /opt/xray-vps-setup/routes/ips.txt ]]; then
+  cat > /opt/xray-vps-setup/routes/ips.txt << 'ROUTES_EOF'
 # IPs/CIDRs to route through VPS1 (Germany)
 # One per line.
 # Supported formats:
@@ -382,6 +464,7 @@ cat > /opt/xray-vps-setup/routes/ips.txt << 'ROUTES_EOF'
 # 8.8.8.8
 # 1.0.0.0/24
 ROUTES_EOF
+fi
 
 # Install apply-routes script
 cat > /usr/local/bin/apply-routes.sh << 'APPLYSCRIPT_EOF'
@@ -468,7 +551,7 @@ GEODATA_EOF
 chmod +x /usr/local/bin/update-geodata.sh
 
 # Schedule weekly geodata update (Monday 4:00 AM)
-(crontab -l 2>/dev/null | grep -v 'update-geodata'; echo "0 4 * * 1 /usr/local/bin/update-geodata.sh >/dev/null 2>&1") | crontab -
+({ crontab -l 2>/dev/null || true; } | grep -v 'update-geodata' || true; echo "0 4 * * 1 /usr/local/bin/update-geodata.sh >/dev/null 2>&1") | crontab -
 
 # Cleanup temp files
 rm -f /tmp/panel_hosts.json /tmp/panel_hosts_updated.json /tmp/xray.zip
@@ -477,7 +560,7 @@ rm -f /tmp/panel_hosts.json /tmp/panel_hosts_updated.json /tmp/xray.zip
 clear
 echo "========================================="
 echo " VPS2 Marzban Panel: http://localhost:8000/$MARZBAN_PATH"
-echo " (access via SSH tunnel: ssh -L 8000:localhost:8000 root@<VPS2_IP>)"
+echo " (access via SSH tunnel: ssh -p ${SSH_PORT:-22} -L 8000:localhost:8000 ${SSH_USER:-root}@<VPS2_IP>)"
 echo " Panel user: $MARZBAN_USER"
 echo " Panel pass: $MARZBAN_PASS"
 echo ""
