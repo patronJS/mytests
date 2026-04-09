@@ -1,0 +1,49 @@
+{
+  "log": {
+    "level": "warn",
+    "timestamp": true
+  },
+
+  "inbounds": [
+    {
+      "type": "tun",
+      "tag": "tun-in",
+      "interface_name": "tun0",
+      "address": ["198.18.0.1/15"],
+      "mtu": 1500,
+      "auto_route": false,
+      "stack": "system"
+    }
+  ],
+
+  "outbounds": [
+    {
+      "type": "vless",
+      "tag": "proxy",
+      "server": "<YOUR_VPS_IP>",
+      "server_port": 443,
+      "uuid": "<YOUR_UUID>",
+      "tls": {
+        "enabled": true,
+        "server_name": "yandex.ru",
+        "reality": {
+          "enabled": true,
+          "public_key": "<YOUR_REALITY_PUBLIC_KEY>",
+          "short_id": "<YOUR_SHORT_ID>"
+        },
+        "utls": {
+          "enabled": true,
+          "fingerprint": "firefox"
+        }
+      }
+    }
+  ],
+
+  "route": {
+    "rules": [
+      { "action": "sniff" }
+    ],
+    "final": "proxy",
+    "auto_detect_interface": true
+  }
+}

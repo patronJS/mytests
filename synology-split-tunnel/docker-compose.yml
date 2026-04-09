@@ -1,0 +1,40 @@
+services:
+  wg-easy:
+    image: ghcr.io/wg-easy/wg-easy:15.2.2
+    container_name: wg-easy
+    environment:
+      - LANG=en
+      - WG_HOST=192.168.88.20
+      - WG_PORT=51820
+      - WG_DEFAULT_DNS=1.1.1.1
+      - WG_ALLOWED_IPS=0.0.0.0/0
+      - WG_PERSISTENT_KEEPALIVE=25
+      - INSECURE=true
+    volumes:
+      - ./wg-data:/etc/wireguard
+      - ./scripts/ip6tables-stub.sh:/usr/sbin/ip6tables:ro
+    network_mode: host
+    cap_add:
+      - NET_ADMIN
+      - SYS_MODULE
+    restart: unless-stopped
+
+  sing-box:
+    image: ghcr.io/sagernet/sing-box:v1.13.6
+    container_name: sing-box
+    volumes:
+      - ./sing-box:/etc/sing-box:ro
+      - ./scripts/setup-routing.sh:/setup-routing.sh:ro
+    devices:
+      - /dev/net/tun:/dev/net/tun
+    privileged: true
+    network_mode: "service:wg-easy"
+    depends_on:
+      - wg-easy
+    restart: unless-stopped
+    entrypoint:
+      - /bin/sh
+      - -c
+      - |
+        /setup-routing.sh 2>&1
+        exec sing-box run -c /etc/sing-box/config.json
