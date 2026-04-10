@@ -135,6 +135,26 @@ curl -s https://ifconfig.me
 /ip firewall mangle add chain=forward protocol=tcp tcp-flags=syn in-interface=wg-tunnel action=change-mss new-mss=clamp-to-pmtu passthrough=yes comment="MSS clamp WG in"
 ```
 
+### Исключение сервисов из туннеля
+
+Некоторые сервисы (корпоративные VPN, банковские приложения и т.д.) не работают через цепочку прокси из-за MTU или гео-ограничений. Их нужно пускать напрямую, минуя WG-туннель.
+
+Правило ставится **перед** `via-wg` (параметр `place-before=3`):
+
+```routeros
+# Исключить IP из туннеля (трафик пойдёт напрямую)
+/ip firewall mangle add chain=prerouting action=accept dst-address=89.175.46.105 src-address-list=vpn-clients comment="HSE VPN direct" place-before=3
+
+# Можно добавить несколько адресов или подсети
+/ip firewall mangle add chain=prerouting action=accept dst-address=1.2.3.0/24 src-address-list=vpn-clients comment="Bank direct" place-before=3
+```
+
+Проверить порядок правил:
+```routeros
+/ip firewall mangle print
+# accept-правила должны стоять ДО правила с mark-routing via-wg
+```
+
 ### Управление списком vpn-clients
 
 ```routeros
@@ -160,6 +180,7 @@ curl -s https://ifconfig.me
 | Нет интернета у vpn-clients | `docker logs sing-box` — есть ли `default route set to tun0` |
 | Сайты не открываются | MSS clamping на Mikrotik (см. выше) |
 | Медленная загрузка | Проверить CPU Synology; MSS clamping; `stack: system` в config.json |
+| VPN/сервис поверх туннеля не работает | Исключить IP из туннеля (см. «Исключение сервисов») |
 | VPS недоступен | VLESS credentials в config.json |
 | WG handshake не проходит | Сверить ключи в wg-easy Web UI и peer на Mikrotik |
 | Web UI wg-easy недоступен | `http://192.168.88.20:51821` (только из LAN) |

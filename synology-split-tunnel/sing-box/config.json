@@ -40,9 +40,6 @@
   ],
 
   "route": {
-    "rules": [
-      { "action": "sniff" }
-    ],
     "final": "proxy",
     "auto_detect_interface": true
   }
