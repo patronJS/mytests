@@ -86,6 +86,8 @@ if [[ ${configure_ssh_input,,} == "y" ]]; then
   done
 
   read -ep "Enter SSH public key:"$'\n' input_ssh_pbk
+  # Normalize: strip CR and trailing whitespace so dedupe works across reruns
+  input_ssh_pbk=$(printf '%s' "$input_ssh_pbk" | tr -d '\r' | sed 's/[[:space:]]*$//')
   ssh_key_tmp=$(mktemp)
   echo "$input_ssh_pbk" > "$ssh_key_tmp"
   if ! ssh-keygen -l -f "$ssh_key_tmp"; then
@@ -236,10 +238,44 @@ systemctl enable fail2ban
 systemctl restart fail2ban
 
 # SSH hardening
-export SSH_USER=$(grep -E '^[a-z]{4,6}$' /usr/share/dict/words | shuf -n 1)
-export SSH_USER_PASS=$(tr -dc A-Za-z0-9 </dev/urandom | head -c 13; echo)
+# Persist SSH state across reruns to avoid creating a new privileged user every run
+SSH_STATE_FILE="/opt/xray-vps-setup/.ssh-state.env"
+ssh_state_existed=0
+if [[ -f "$SSH_STATE_FILE" ]]; then
+  ssh_state_existed=1
+  # shellcheck disable=SC1090
+  source "$SSH_STATE_FILE"
+else
+  # Pick a dictionary word that does NOT collide with an existing system account
+  SSH_USER=""
+  for _ in $(seq 1 50); do
+    candidate=$(grep -E '^[a-z]{4,6}$' /usr/share/dict/words | shuf -n 1)
+    if [[ -n "$candidate" ]] && ! id "$candidate" &>/dev/null; then
+      SSH_USER="$candidate"
+      break
+    fi
+  done
+  if [[ -z "$SSH_USER" ]]; then
+    SSH_USER="op$(tr -dc 'a-z0-9' </dev/urandom | head -c 6)"
+  fi
+  SSH_USER_PASS=$(tr -dc A-Za-z0-9 </dev/urandom | head -c 13)
+  mkdir -p /opt/xray-vps-setup
+  cat > "$SSH_STATE_FILE" << SSH_STATE_EOF
+export SSH_USER="$SSH_USER"
+export SSH_USER_PASS="$SSH_USER_PASS"
+SSH_STATE_EOF
+  chmod 600 "$SSH_STATE_FILE"
+fi
+export SSH_USER SSH_USER_PASS
 
 sshd_edit() {
+  # Preflight: refuse if the chosen port is bound by anything other than sshd itself
+  if ss -tlnp 2>/dev/null | grep -E ":${SSH_PORT}[[:space:]]" | grep -qv '"sshd"'; then
+    echo "ERROR: port $SSH_PORT is already bound by another service:"
+    ss -tlnp | grep -E ":${SSH_PORT}[[:space:]]" || true
+    echo "Choose a different port or stop that service, then rerun."
+    exit 1
+  fi
   fetch_template "00-disable-password" | envsubst > /etc/ssh/sshd_config.d/00-disable-password.conf
   sshd -t || { echo "ERROR: sshd config test failed — reverting"; rm -f /etc/ssh/sshd_config.d/00-disable-password.conf; exit 1; }
   systemctl daemon-reload
@@ -247,20 +283,33 @@ sshd_edit() {
 }
 
 add_user() {
-  id "$SSH_USER" &>/dev/null || useradd "$SSH_USER" -s /bin/bash
+  local ssh_home
+  if id "$SSH_USER" &>/dev/null; then
+    ssh_home=$(getent passwd "$SSH_USER" | cut -d: -f6)
+  else
+    useradd "$SSH_USER" -m -s /bin/bash
+    ssh_home=$(getent passwd "$SSH_USER" | cut -d: -f6)
+  fi
+  [[ -n "$ssh_home" && -d "$ssh_home" ]] || { echo "ERROR: cannot resolve home dir for $SSH_USER"; exit 1; }
   usermod -aG sudo "$SSH_USER"
-  echo "$SSH_USER:$SSH_USER_PASS" | chpasswd
-  mkdir -p "/home/$SSH_USER/.ssh"
-  touch "/home/$SSH_USER/.ssh/authorized_keys"
-  grep -qF "$input_ssh_pbk" "/home/$SSH_USER/.ssh/authorized_keys" 2>/dev/null || echo "$input_ssh_pbk" >> "/home/$SSH_USER/.ssh/authorized_keys"
-  chmod 700 "/home/$SSH_USER/.ssh/"
-  chmod 600 "/home/$SSH_USER/.ssh/authorized_keys"
-  chown "$SSH_USER:$SSH_USER" -R "/home/$SSH_USER"
+  if (( ssh_state_existed == 0 )); then
+    echo "$SSH_USER:$SSH_USER_PASS" | chpasswd
+  fi
+  mkdir -p "$ssh_home/.ssh"
+  touch "$ssh_home/.ssh/authorized_keys"
+  grep -qF "$input_ssh_pbk" "$ssh_home/.ssh/authorized_keys" 2>/dev/null || echo "$input_ssh_pbk" >> "$ssh_home/.ssh/authorized_keys"
+  chmod 700 "$ssh_home/.ssh/"
+  chmod 600 "$ssh_home/.ssh/authorized_keys"
+  chown "$SSH_USER:$SSH_USER" -R "$ssh_home/.ssh"
   usermod -aG docker "$SSH_USER"
 }
 
 if [[ ${configure_ssh_input,,} == "y" ]]; then
-  echo "New user for ssh: $SSH_USER, password for user: $SSH_USER_PASS. New port for SSH: $SSH_PORT."
+  if (( ssh_state_existed == 1 )); then
+    echo "Reusing persisted SSH user: $SSH_USER (state file $SSH_STATE_FILE)"
+  else
+    echo "New user for ssh: $SSH_USER, password for user: $SSH_USER_PASS. New port for SSH: $SSH_PORT."
+  fi
   add_user
   sshd_edit
 fi
