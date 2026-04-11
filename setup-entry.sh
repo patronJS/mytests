@@ -406,9 +406,18 @@ PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 
 XRAY_CONFIG="/opt/xray-vps-setup/node/xray_config.json"
 COMPOSE_FILE="/opt/xray-vps-setup/docker-compose.yml"
+WARP_PROXY_PORT=40000
 
 if [[ $EUID -ne 0 ]]; then
   echo "Must be run as root"
+  exit 1
+fi
+
+# Preflight: xray_config.json assumes host networking because warp outbound
+# points at 127.0.0.1:40000 on the host loopback.
+if ! grep -qE '^\s*network_mode:\s*host' "$COMPOSE_FILE"; then
+  echo "ERROR: $COMPOSE_FILE does not use network_mode: host"
+  echo "The warp outbound targets 127.0.0.1:$WARP_PROXY_PORT and only works with host networking."
   exit 1
 fi
 
@@ -438,7 +447,7 @@ if warp-cli status 2>/dev/null | grep -q "Registration Missing"; then
     exit 1
   fi
 fi
-if ! warp-cli mode proxy || ! warp-cli proxy port 40000; then
+if ! warp-cli mode proxy || ! warp-cli proxy port "$WARP_PROXY_PORT"; then
   echo "WARP client configuration failed"
   exit 1
 fi
@@ -449,8 +458,34 @@ if ! warp-cli status 2>/dev/null | grep -q "Connected"; then
   fi
 fi
 
+# Wait for the SOCKS listener to actually accept connections before
+# switching XRay traffic to it.
+socks_ready=0
+for _ in $(seq 1 20); do
+  if ss -tln 2>/dev/null | grep -qE ":${WARP_PROXY_PORT}[[:space:]]"; then
+    socks_ready=1
+    break
+  fi
+  sleep 0.5
+done
+if (( socks_ready == 0 )); then
+  echo "ERROR: warp-cli is connected but 127.0.0.1:$WARP_PROXY_PORT is not listening"
+  warp-cli disconnect 2>/dev/null || true
+  exit 1
+fi
+
 backup=$(mktemp "${XRAY_CONFIG}.bak.XXXXXX")
 cp "$XRAY_CONFIG" "$backup"
+
+# Cleanup trap: if anything below bails out, restore config and disconnect warp.
+cleanup_failed() {
+  if [[ -f "$backup" ]]; then
+    cp "$backup" "$XRAY_CONFIG" 2>/dev/null || true
+    rm -f "$backup"
+  fi
+  warp-cli disconnect 2>/dev/null || true
+}
+trap 'cleanup_failed' ERR INT TERM
 
 yq eval 'del(.outbounds[] | select(.tag == "warp"))' -i "$XRAY_CONFIG"
 yq eval \
@@ -462,12 +497,15 @@ yq eval \
   '(.routing.rules[] | select(.inboundTag != null)).outboundTag = "warp"' \
   -i "$XRAY_CONFIG"
 
-patched=$(yq eval '.routing.rules[] | select(.inboundTag != null) | .outboundTag' "$XRAY_CONFIG")
+# Readback uses -r so scalars come back unquoted (yq v4 on .json input
+# otherwise emits "warp" with literal quotes and the compare below fails).
+patched=$(yq -r eval '.routing.rules[] | select(.inboundTag != null) | .outboundTag' "$XRAY_CONFIG")
 if [[ "$patched" != "warp" ]]; then
   echo "XRay config patch did not apply correctly, rolling back"
   cp "$backup" "$XRAY_CONFIG"
   warp-cli disconnect 2>/dev/null || true
   rm -f "$backup"
+  trap - ERR INT TERM
   exit 1
 fi
 
@@ -475,10 +513,13 @@ if ! docker compose -f "$COMPOSE_FILE" restart; then
   echo "Docker restart failed, rolling back XRay config"
   cp "$backup" "$XRAY_CONFIG"
   docker compose -f "$COMPOSE_FILE" restart 2>/dev/null || true
+  warp-cli disconnect 2>/dev/null || true
   rm -f "$backup"
+  trap - ERR INT TERM
   exit 1
 fi
 
+trap - ERR INT TERM
 rm -f "$backup"
 echo "WARP enabled as catch-all outbound (replaces chain-vps1)"
 ENABLEWARP_EOF
@@ -501,6 +542,15 @@ fi
 backup=$(mktemp "${XRAY_CONFIG}.bak.XXXXXX")
 cp "$XRAY_CONFIG" "$backup"
 
+# Cleanup trap: restore config on any failure (including Ctrl-C).
+cleanup_failed() {
+  if [[ -f "$backup" ]]; then
+    cp "$backup" "$XRAY_CONFIG" 2>/dev/null || true
+    rm -f "$backup"
+  fi
+}
+trap 'cleanup_failed' ERR INT TERM
+
 # Revert catch-all: warp → chain-vps1
 yq eval \
   '(.routing.rules[] | select(.inboundTag != null) | select(.outboundTag == "warp")).outboundTag = "chain-vps1"' \
@@ -514,14 +564,17 @@ if ! docker compose -f "$COMPOSE_FILE" restart; then
   cp "$backup" "$XRAY_CONFIG"
   docker compose -f "$COMPOSE_FILE" restart 2>/dev/null || true
   rm -f "$backup"
+  trap - ERR INT TERM
   exit 1
 fi
 
+trap - ERR INT TERM
 rm -f "$backup"
 
+# Disconnect only — keep registration so re-enable is fast.
+# Use `warp-cli registration delete` manually if you want a full teardown.
 if command -v warp-cli >/dev/null 2>&1; then
   warp-cli disconnect 2>/dev/null || true
-  warp-cli registration delete 2>/dev/null || true
 fi
 
 echo "WARP disabled, catch-all reverted to chain-vps1"
