@@ -307,7 +307,12 @@ else
 
   MARZBAN_USER=$(grep -E '^[a-z]{4,6}$' /usr/share/dict/words 2>/dev/null | shuf -n 1 || true)
   [[ -n "$MARZBAN_USER" ]] || MARZBAN_USER="adm$(openssl rand -hex 3)"
-  MARZBAN_PASS=$(tr -dc A-Za-z0-9 </dev/urandom | head -c 13)
+  # Note: we intentionally avoid `tr </dev/urandom | head -c N` because with
+  # `set -o pipefail` the early close by head causes SIGPIPE in tr → exit 141.
+  # Instead, read a fixed amount of bytes from urandom, then filter.
+  MARZBAN_PASS=$(LC_ALL=C tr -dc 'A-Za-z0-9' < <(head -c 512 /dev/urandom))
+  MARZBAN_PASS=${MARZBAN_PASS:0:13}
+  [[ ${#MARZBAN_PASS} -eq 13 ]] || { echo "ERROR: MARZBAN_PASS generation failed"; exit 1; }
   MARZBAN_PATH=$(openssl rand -hex 8)
   MARZBAN_SUB_PATH=$(openssl rand -hex 8)
 
@@ -566,9 +571,13 @@ else
     fi
   done
   if [[ -z "$SSH_USER" ]]; then
-    SSH_USER="op$(tr -dc 'a-z0-9' </dev/urandom | head -c 6)"
+    _rand_suffix=$(LC_ALL=C tr -dc 'a-z0-9' < <(head -c 256 /dev/urandom))
+    SSH_USER="op${_rand_suffix:0:6}"
+    unset _rand_suffix
   fi
-  SSH_USER_PASS=$(tr -dc A-Za-z0-9 </dev/urandom | head -c 13)
+  SSH_USER_PASS=$(LC_ALL=C tr -dc 'A-Za-z0-9' < <(head -c 512 /dev/urandom))
+  SSH_USER_PASS=${SSH_USER_PASS:0:13}
+  [[ ${#SSH_USER_PASS} -eq 13 ]] || { echo "ERROR: SSH_USER_PASS generation failed"; exit 1; }
 
   # Atomic write — same pattern as .secrets.env
   ssh_state_tmp=$(mktemp "${SSH_STATE_FILE}.XXXXXX")
