@@ -309,10 +309,16 @@ iptables_add OUTPUT -o lo -j ACCEPT
 iptables -P INPUT DROP
 netfilter-persistent save
 
+# fail2ban — SSH brute-force protection (installed regardless of hardening choice)
+apt-get install fail2ban -y
+fetch_template "fail2ban-jail" | envsubst '$SSH_PORT' > /etc/fail2ban/jail.local
+systemctl enable fail2ban
+systemctl restart fail2ban
+
 # SSH hardening
 export SSH_USER=$(grep -E '^[a-z]{4,6}$' /usr/share/dict/words | shuf -n 1)
 export SSH_USER_PASS=$(tr -dc A-Za-z0-9 </dev/urandom | head -c 13; echo)
-export SSH_PORT=${input_ssh_port:-22}
+# NB: SSH_PORT already resolved above (input_ssh_port → or ss-detect → or 22)
 
 sshd_edit() {
   fetch_template "00-disable-password" | envsubst > /etc/ssh/sshd_config.d/00-disable-password.conf
@@ -620,6 +626,13 @@ echo ""
 echo " === Geodata ==="
 echo " geosite.dat/geoip.dat auto-update: weekly (Mon 4:00 AM)"
 echo " Manual update: update-geodata.sh"
+echo ""
+echo " === Security ==="
+echo " fail2ban is installed and active (sshd jail, backend=systemd)."
+echo "   bantime=1h, findtime=10m, maxretry=5"
+echo " Useful commands:"
+echo "   fail2ban-client status sshd       # jail status + banned IPs"
+echo "   fail2ban-client unban <ip>        # lift a ban"
 echo ""
 echo " === WARP (optional) ==="
 echo " To forward catch-all traffic via Cloudflare WARP (instead of VPS1):"

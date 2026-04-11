@@ -75,13 +75,16 @@ sysctl -w net.ipv6.conf.default.disable_ipv6=1
 bash <(wget -qO- https://raw.githubusercontent.com/patronJS/mytests/refs/heads/main/setup-panel.sh)
 ```
 
-Скрипт задаст вопрос:
+Скрипт задаст вопросы:
 
-| Вопрос            | Значение       |
-| ----------------- | -------------- |
-| Enter your domain | Домен для VPS1 |
+| Вопрос                    | Значение                                           |
+| ------------------------- | -------------------------------------------------- |
+| Enter your domain         | Домен для VPS1                                     |
+| Do you want to harden SSH | `y` — создать нового пользователя, сменить порт    |
+| Enter SSH port            | Новый порт для sshd (нельзя 80/443/4123/49321)     |
+| Enter SSH public key      | Публичный ключ (`ssh-ed25519 … user@host`)         |
 
-Устанавливает Docker, XRay, Marzban, Angie. Генерирует ключи x25519, UUID, рандомные пути.
+Устанавливает Docker, XRay, Marzban, Angie, **fail2ban**. Генерирует ключи x25519, UUID, рандомные пути. Если выбран SSH hardening — создаёт нового sudo-пользователя, отключает `PermitRootLogin` и `PasswordAuthentication`, применяет дроп-ин с `MaxAuthTries 3` и `LoginGraceTime 30`.
 
 В конце скрипт выведет блок значений — **сохраните его целиком**, он понадобится на следующем шаге:
 
@@ -128,7 +131,9 @@ bash <(wget -qO- https://raw.githubusercontent.com/patronJS/mytests/refs/heads/m
 
 Далее скрипт предложит опциональные настройки:
 
-- **SSH hardening** — создание пользователя, запрет root-входа, аутентификация по ключу, смена порта
+- **SSH hardening** — создание пользователя, запрет root-входа, аутентификация по ключу, смена порта, `MaxAuthTries 3`, `LoginGraceTime 30`
+
+**fail2ban устанавливается автоматически на оба VPS** (jail `sshd`, backend `systemd`, `bantime=1h`, `findtime=10m`, `maxretry=5`). Проверить статус: `fail2ban-client status sshd`, снять бан: `fail2ban-client unban <ip>`.
 
 После завершения всё готово к работе — отдельный шаг для связывания серверов не нужен.
 
@@ -234,6 +239,7 @@ apply-routes.sh
 - Межсерверный канал `VPS2 -> VPS1` вынесен на нестандартный TCP-порт **49321**: это скрытый служебный линк, ему не требуется маскироваться под публичный HTTPS на `:443`
 - **IPv6 полностью отключён** — sysctl на уровне ядра, `apt ForceIPv4`, все wget/curl с флагом `-4`, убраны IPv6-listener из Angie
 - WARP (опционально) — catch-all (всё что не в exclude list) идёт через Cloudflare WARP вместо VPS1
+- **fail2ban** — автоматически ставится на оба VPS, jail `sshd` (`bantime=1h`, `findtime=10m`, `maxretry=5`), использует systemd journal backend
 
 ## Geodata (geosite.dat / geoip.dat)
 

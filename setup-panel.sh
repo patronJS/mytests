@@ -76,6 +76,26 @@ else
   fi
 fi
 
+# Optional config prompts
+read -ep "Do you want to harden SSH? [y/N] "$'\n' configure_ssh_input
+if [[ ${configure_ssh_input,,} == "y" ]]; then
+  read -ep "Enter SSH port. Default 22, can't use ports: 80, 443, 4123, 49321:"$'\n' input_ssh_port
+
+  while ! [[ "$input_ssh_port" =~ ^[0-9]+$ ]] || (( input_ssh_port < 1 || input_ssh_port > 65535 )) || [[ "$input_ssh_port" -eq 80 || "$input_ssh_port" -eq 443 || "$input_ssh_port" -eq 4123 || "$input_ssh_port" -eq 49321 ]]; do
+    read -ep "Invalid or reserved port ($input_ssh_port). Use 1-65535, not 80/443/4123/49321:"$'\n' input_ssh_port
+  done
+
+  read -ep "Enter SSH public key:"$'\n' input_ssh_pbk
+  ssh_key_tmp=$(mktemp)
+  echo "$input_ssh_pbk" > "$ssh_key_tmp"
+  if ! ssh-keygen -l -f "$ssh_key_tmp"; then
+    rm -f "$ssh_key_tmp"
+    echo "Can't verify the public key. Try again and make sure to include 'ssh-rsa' or 'ssh-ed25519' followed by 'user@pcname' at the end of the file."
+    exit 1
+  fi
+  rm -f "$ssh_key_tmp"
+fi
+
 # Install Docker
 docker_install() {
   curl -4 -fsSL https://get.docker.com | sh
@@ -181,8 +201,13 @@ if [[ "$MARZBAN_IMPORTED" != "true" ]]; then
 fi
 
 # Configure iptables
-export SSH_PORT=$(ss -tlnp | grep sshd | grep -Po '(?<=:)\d+(?= )' | head -n 1)
-SSH_PORT=${SSH_PORT:-22}
+# Use the user-supplied SSH port if hardening was requested, otherwise detect current
+if [[ ${configure_ssh_input,,} == "y" && -n "${input_ssh_port:-}" ]]; then
+  export SSH_PORT="${input_ssh_port}"
+else
+  export SSH_PORT=$(ss -tlnp | grep sshd | grep -Po '(?<=:)\d+(?= )' | head -n 1)
+  SSH_PORT=${SSH_PORT:-22}
+fi
 
 debconf-set-selections <<EOF
 iptables-persistent iptables-persistent/autosave_v4 boolean true
@@ -203,6 +228,42 @@ iptables_add INPUT -i lo -j ACCEPT
 iptables_add OUTPUT -o lo -j ACCEPT
 iptables -P INPUT DROP
 netfilter-persistent save
+
+# fail2ban — SSH brute-force protection (installed regardless of hardening choice)
+apt-get install fail2ban -y
+fetch_template "fail2ban-jail" | envsubst '$SSH_PORT' > /etc/fail2ban/jail.local
+systemctl enable fail2ban
+systemctl restart fail2ban
+
+# SSH hardening
+export SSH_USER=$(grep -E '^[a-z]{4,6}$' /usr/share/dict/words | shuf -n 1)
+export SSH_USER_PASS=$(tr -dc A-Za-z0-9 </dev/urandom | head -c 13; echo)
+
+sshd_edit() {
+  fetch_template "00-disable-password" | envsubst > /etc/ssh/sshd_config.d/00-disable-password.conf
+  sshd -t || { echo "ERROR: sshd config test failed — reverting"; rm -f /etc/ssh/sshd_config.d/00-disable-password.conf; exit 1; }
+  systemctl daemon-reload
+  systemctl restart ssh
+}
+
+add_user() {
+  id "$SSH_USER" &>/dev/null || useradd "$SSH_USER" -s /bin/bash
+  usermod -aG sudo "$SSH_USER"
+  echo "$SSH_USER:$SSH_USER_PASS" | chpasswd
+  mkdir -p "/home/$SSH_USER/.ssh"
+  touch "/home/$SSH_USER/.ssh/authorized_keys"
+  grep -qF "$input_ssh_pbk" "/home/$SSH_USER/.ssh/authorized_keys" 2>/dev/null || echo "$input_ssh_pbk" >> "/home/$SSH_USER/.ssh/authorized_keys"
+  chmod 700 "/home/$SSH_USER/.ssh/"
+  chmod 600 "/home/$SSH_USER/.ssh/authorized_keys"
+  chown "$SSH_USER:$SSH_USER" -R "/home/$SSH_USER"
+  usermod -aG docker "$SSH_USER"
+}
+
+if [[ ${configure_ssh_input,,} == "y" ]]; then
+  echo "New user for ssh: $SSH_USER, password for user: $SSH_USER_PASS. New port for SSH: $SSH_PORT."
+  add_user
+  sshd_edit
+fi
 
 # Create update-geodata.sh helper
 cat > /usr/local/bin/update-geodata.sh << 'GEODATA_EOF'
@@ -232,8 +293,13 @@ rm -f /tmp/xray.zip
 # Output
 clear
 echo "========================================="
-echo " Marzban Panel: http://localhost:8000/$MARZBAN_PATH"
-echo " (access via SSH tunnel: ssh -L 8000:localhost:8000 root@<VPS1_IP>)"
+if [[ ${configure_ssh_input,,} == "y" ]]; then
+  echo " Marzban Panel: http://localhost:8000/$MARZBAN_PATH"
+  echo " (access via SSH tunnel: ssh -p $SSH_PORT -L 8000:localhost:8000 $SSH_USER@<VPS1_IP>)"
+else
+  echo " Marzban Panel: http://localhost:8000/$MARZBAN_PATH"
+  echo " (access via SSH tunnel: ssh -L 8000:localhost:8000 root@<VPS1_IP>)"
+fi
 echo " Panel user: $MARZBAN_USER"
 echo " Panel pass: $MARZBAN_PASS"
 echo ""
@@ -245,7 +311,17 @@ echo " UUID_LINK:       $UUID_LINK"
 echo " XHTTP_PATH:      $XHTTP_PATH"
 echo " VPS1_DOMAIN:      $VPS1_DOMAIN"
 echo ""
+echo " === Security ==="
+echo " fail2ban is installed and active (sshd jail, backend=systemd)."
+echo "   bantime=1h, findtime=10m, maxretry=5"
+echo " Useful commands:"
+echo "   fail2ban-client status sshd       # jail status + banned IPs"
+echo "   fail2ban-client unban <ip>        # lift a ban"
+echo ""
 echo " === Geodata ==="
 echo " geosite.dat/geoip.dat auto-update: weekly (Mon 4:00 AM)"
 echo " Manual update: update-geodata.sh"
 echo "========================================="
+if [[ ${configure_ssh_input,,} == "y" ]]; then
+  echo " SSH user: $SSH_USER, SSH password: $SSH_USER_PASS, SSH port: $SSH_PORT"
+fi
