@@ -129,9 +129,18 @@ bash <(wget -qO- https://raw.githubusercontent.com/patronJS/mytests/refs/heads/m
 Далее скрипт предложит опциональные настройки:
 
 - **SSH hardening** — создание пользователя, запрет root-входа, аутентификация по ключу, смена порта
-- **WARP** — catch-all трафик (не из exclude list) через Cloudflare WARP вместо VPS1
 
 После завершения всё готово к работе — отдельный шаг для связывания серверов не нужен.
+
+**WARP — опционально, вручную на сервере** (если нужно вывести catch-all через Cloudflare WARP вместо VPS1):
+
+```bash
+# Включить: установит cloudflare-warp, зарегистрирует, пропатчит XRay
+enable-warp.sh
+
+# Отключить: вернёт catch-all обратно на chain-vps1
+disable-warp.sh
+```
 
 ---
 
@@ -158,9 +167,10 @@ bash <(wget -qO- https://raw.githubusercontent.com/patronJS/mytests/refs/heads/m
 ```
 # Всё по умолчанию — через цепочку VPS1 (немецкий IP)
 VLESS-клиент  → VPS2:443   → XHTTP+REALITY → VPS1:49321 → Интернет (немецкий IP)
+# (если включён WARP — catch-all уходит через Cloudflare WARP вместо VPS1)
 
-# Трафик из exclude list — напрямую с VPS2 (или через WARP)
-VLESS-клиент  → VPS2:443   → direct/WARP   → Интернет (российский IP)
+# Трафик из exclude list — напрямую с VPS2
+VLESS-клиент  → VPS2:443   → direct        → Интернет (российский IP)
 ```
 
 ### Exclude-list routing (VPS2)

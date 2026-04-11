@@ -112,15 +112,6 @@ if [[ ${configure_ssh_input,,} == "y" ]]; then
   rm -f "$ssh_key_tmp"
 fi
 
-configure_warp_input="n"
-read -ep "Enable WARP? (forwards catch-all traffic via Cloudflare WARP instead of VPS1) [y/N] "$'\n' configure_warp_input
-if [[ ${configure_warp_input,,} == "y" ]]; then
-  if ! curl -4 -I https://api.cloudflareclient.com --connect-timeout 10 > /dev/null 2>&1; then
-    echo "Warp can't be used"
-    configure_warp_input="n"
-  fi
-fi
-
 # Install Docker
 docker_install() {
   curl -4 -fsSL https://get.docker.com | sh
@@ -349,87 +340,135 @@ if [[ ${configure_ssh_input,,} == "y" ]]; then
   sshd_edit
 fi
 
-# WARP install
-warp_install() {
-  # Run in subshell-like guard so set -e doesn't kill the main script
-  _warp_install_inner || { echo "WARP setup failed, continuing without it"; return 0; }
-}
+# Install enable-warp.sh helper (manual WARP toggle, run by user after setup)
+cat > /usr/local/bin/enable-warp.sh << 'ENABLEWARP_EOF'
+#!/bin/bash
+set -euo pipefail
+PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 
-_warp_install_inner() {
-  apt install gpg -y
+XRAY_CONFIG="/opt/xray-vps-setup/node/xray_config.json"
+COMPOSE_FILE="/opt/xray-vps-setup/docker-compose.yml"
+
+if [[ $EUID -ne 0 ]]; then
+  echo "Must be run as root"
+  exit 1
+fi
+
+if ! curl -4 -I https://api.cloudflareclient.com --connect-timeout 10 > /dev/null 2>&1; then
+  echo "Error: can't reach Cloudflare WARP API. WARP is unavailable in this region."
+  exit 1
+fi
+
+if ! command -v warp-cli >/dev/null 2>&1; then
   echo "Installing Cloudflare WARP..."
-  curl -4 -fsSL https://pkg.cloudflareclient.com/pubkey.gpg | gpg --yes --dearmor --output /usr/share/keyrings/cloudflare-warp-archive-keyring.gpg
+  apt install gpg -y
+  curl -4 -fsSL https://pkg.cloudflareclient.com/pubkey.gpg \
+    | gpg --yes --dearmor --output /usr/share/keyrings/cloudflare-warp-archive-keyring.gpg
   mkdir -p /etc/apt/sources.list.d
-  echo "deb [signed-by=/usr/share/keyrings/cloudflare-warp-archive-keyring.gpg] https://pkg.cloudflareclient.com/ $(. /etc/os-release && echo $VERSION_CODENAME) main" > /etc/apt/sources.list.d/cloudflare-client.list
+  echo "deb [signed-by=/usr/share/keyrings/cloudflare-warp-archive-keyring.gpg] https://pkg.cloudflareclient.com/ $(. /etc/os-release && echo $VERSION_CODENAME) main" \
+    > /etc/apt/sources.list.d/cloudflare-client.list
   apt update
   if ! apt install cloudflare-warp -y; then
     echo "Failed to install cloudflare-warp package"
-    return 1
+    exit 1
   fi
-
-  # Idempotent registration: reuse existing or create new
-  if warp-cli status 2>/dev/null | grep -q "Registration Missing"; then
-    if ! echo "y" | warp-cli registration new; then
-      echo "Couldn't register WARP"
-      return 1
-    fi
-  fi
-  # Always enforce desired state regardless of prior runs
-  if ! warp-cli mode proxy || ! warp-cli proxy port 40000; then
-    echo "WARP client configuration failed"
-    return 1
-  fi
-  if ! warp-cli status 2>/dev/null | grep -q "Connected"; then
-    if ! timeout 30 warp-cli connect; then
-      echo "WARP connect timed out"
-      return 1
-    fi
-  fi
-
-  local XRAY_CONFIG_WARP="/opt/xray-vps-setup/node/xray_config.json"
-  local backup
-  backup=$(mktemp "${XRAY_CONFIG_WARP}.bak.XXXXXX")
-  cp "$XRAY_CONFIG_WARP" "$backup"
-
-  # Upsert WARP SOCKS outbound: remove old if present, then add correct one
-  yq eval 'del(.outbounds[] | select(.tag == "warp"))' -i "$XRAY_CONFIG_WARP"
-  yq eval \
-    '.outbounds += {"tag": "warp","protocol": "socks","settings": {"servers": [{"address": "127.0.0.1","port": 40000}]}}' \
-    -i "$XRAY_CONFIG_WARP"
-
-  # Switch catch-all inbound rule outbound (chain-vps1 or direct) → warp
-  yq eval \
-    '(.routing.rules[] | select(.inboundTag != null)).outboundTag = "warp"' \
-    -i "$XRAY_CONFIG_WARP"
-
-  # Verify the patch actually took effect
-  local patched
-  patched=$(yq eval '.routing.rules[] | select(.inboundTag != null) | .outboundTag' "$XRAY_CONFIG_WARP")
-  if [[ "$patched" != "warp" ]]; then
-    echo "XRay config patch did not apply correctly, rolling back"
-    cp "$backup" "$XRAY_CONFIG_WARP"
-    warp-cli disconnect 2>/dev/null || true
-    warp-cli registration delete 2>/dev/null || true
-    rm -f "$backup"
-    return 1
-  fi
-
-  # Restart XRay with rollback on failure
-  if ! docker compose -f /opt/xray-vps-setup/docker-compose.yml restart; then
-    echo "Docker restart failed, rolling back XRay config"
-    cp "$backup" "$XRAY_CONFIG_WARP"
-    docker compose -f /opt/xray-vps-setup/docker-compose.yml restart 2>/dev/null || true
-    rm -f "$backup"
-    return 1
-  fi
-
-  rm -f "$backup"
-  echo "WARP enabled as catch-all outbound (replaces chain-vps1)"
-}
-
-if [[ ${configure_warp_input,,} == "y" ]]; then
-  warp_install
 fi
+
+if warp-cli status 2>/dev/null | grep -q "Registration Missing"; then
+  if ! echo "y" | warp-cli registration new; then
+    echo "Couldn't register WARP"
+    exit 1
+  fi
+fi
+if ! warp-cli mode proxy || ! warp-cli proxy port 40000; then
+  echo "WARP client configuration failed"
+  exit 1
+fi
+if ! warp-cli status 2>/dev/null | grep -q "Connected"; then
+  if ! timeout 30 warp-cli connect; then
+    echo "WARP connect timed out"
+    exit 1
+  fi
+fi
+
+backup=$(mktemp "${XRAY_CONFIG}.bak.XXXXXX")
+cp "$XRAY_CONFIG" "$backup"
+
+yq eval 'del(.outbounds[] | select(.tag == "warp"))' -i "$XRAY_CONFIG"
+yq eval \
+  '.outbounds += {"tag": "warp","protocol": "socks","settings": {"servers": [{"address": "127.0.0.1","port": 40000}]}}' \
+  -i "$XRAY_CONFIG"
+
+# Catch-all (chain-vps1 or direct) → warp
+yq eval \
+  '(.routing.rules[] | select(.inboundTag != null)).outboundTag = "warp"' \
+  -i "$XRAY_CONFIG"
+
+patched=$(yq eval '.routing.rules[] | select(.inboundTag != null) | .outboundTag' "$XRAY_CONFIG")
+if [[ "$patched" != "warp" ]]; then
+  echo "XRay config patch did not apply correctly, rolling back"
+  cp "$backup" "$XRAY_CONFIG"
+  warp-cli disconnect 2>/dev/null || true
+  rm -f "$backup"
+  exit 1
+fi
+
+if ! docker compose -f "$COMPOSE_FILE" restart; then
+  echo "Docker restart failed, rolling back XRay config"
+  cp "$backup" "$XRAY_CONFIG"
+  docker compose -f "$COMPOSE_FILE" restart 2>/dev/null || true
+  rm -f "$backup"
+  exit 1
+fi
+
+rm -f "$backup"
+echo "WARP enabled as catch-all outbound (replaces chain-vps1)"
+ENABLEWARP_EOF
+chmod +x /usr/local/bin/enable-warp.sh
+
+# Install disable-warp.sh helper (revert to chain-vps1 catch-all)
+cat > /usr/local/bin/disable-warp.sh << 'DISABLEWARP_EOF'
+#!/bin/bash
+set -euo pipefail
+PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+
+XRAY_CONFIG="/opt/xray-vps-setup/node/xray_config.json"
+COMPOSE_FILE="/opt/xray-vps-setup/docker-compose.yml"
+
+if [[ $EUID -ne 0 ]]; then
+  echo "Must be run as root"
+  exit 1
+fi
+
+backup=$(mktemp "${XRAY_CONFIG}.bak.XXXXXX")
+cp "$XRAY_CONFIG" "$backup"
+
+# Revert catch-all: warp → chain-vps1
+yq eval \
+  '(.routing.rules[] | select(.inboundTag != null) | select(.outboundTag == "warp")).outboundTag = "chain-vps1"' \
+  -i "$XRAY_CONFIG"
+
+# Remove warp outbound
+yq eval 'del(.outbounds[] | select(.tag == "warp"))' -i "$XRAY_CONFIG"
+
+if ! docker compose -f "$COMPOSE_FILE" restart; then
+  echo "Docker restart failed, rolling back XRay config"
+  cp "$backup" "$XRAY_CONFIG"
+  docker compose -f "$COMPOSE_FILE" restart 2>/dev/null || true
+  rm -f "$backup"
+  exit 1
+fi
+
+rm -f "$backup"
+
+if command -v warp-cli >/dev/null 2>&1; then
+  warp-cli disconnect 2>/dev/null || true
+  warp-cli registration delete 2>/dev/null || true
+fi
+
+echo "WARP disabled, catch-all reverted to chain-vps1"
+DISABLEWARP_EOF
+chmod +x /usr/local/bin/disable-warp.sh
 
 # Create route files for exclude-list routing (preserve existing on rerun)
 mkdir -p /opt/xray-vps-setup/routes
@@ -581,6 +620,11 @@ echo ""
 echo " === Geodata ==="
 echo " geosite.dat/geoip.dat auto-update: weekly (Mon 4:00 AM)"
 echo " Manual update: update-geodata.sh"
+echo ""
+echo " === WARP (optional) ==="
+echo " To forward catch-all traffic via Cloudflare WARP (instead of VPS1):"
+echo "   enable-warp.sh    # install + enable"
+echo "   disable-warp.sh   # revert to VPS1 catch-all"
 echo ""
 echo " === Next steps ==="
 echo " 1. Connect via SSH tunnel and open Marzban panel"
