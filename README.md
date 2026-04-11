@@ -129,7 +129,7 @@ bash <(wget -qO- https://raw.githubusercontent.com/patronJS/mytests/refs/heads/m
 Далее скрипт предложит опциональные настройки:
 
 - **SSH hardening** — создание пользователя, запрет root-входа, аутентификация по ключу, смена порта
-- **WARP** — маршрутизация российских сайтов через Cloudflare WARP (вместо прямого выхода с VPS2)
+- **WARP** — catch-all трафик (не из exclude list) через Cloudflare WARP вместо VPS1
 
 После завершения всё готово к работе — отдельный шаг для связывания серверов не нужен.
 
@@ -156,46 +156,38 @@ bash <(wget -qO- https://raw.githubusercontent.com/patronJS/mytests/refs/heads/m
 ## Потоки трафика
 
 ```
-# Трафик из whitelist — через цепочку VPS1
+# Всё по умолчанию — через цепочку VPS1 (немецкий IP)
 VLESS-клиент  → VPS2:443   → XHTTP+REALITY → VPS1:49321 → Интернет (немецкий IP)
 
-# Всё остальное — напрямую с VPS2 (или через WARP)
+# Трафик из exclude list — напрямую с VPS2 (или через WARP)
 VLESS-клиент  → VPS2:443   → direct/WARP   → Интернет (российский IP)
 ```
 
-### Whitelist routing (VPS2)
+### Exclude-list routing (VPS2)
 
-По умолчанию весь трафик идёт напрямую с VPS2. Только указанные домены/IP маршрутизируются через VPS1 (Германия).
+По умолчанию **весь** трафик заворачивается через VPS1 (Германия). Только домены/IP, перечисленные в списке, выходят напрямую с VPS2 (российский IP) — это нужно для сервисов, которые блокируют иностранные IP (Госуслуги, Сбербанк, Яндекс и т. п.).
 
 Управление маршрутами — два текстовых файла на VPS2:
 
 | Файл                                     | Формат                | Пример                                                  |
 | ---------------------------------------- | --------------------- | ------------------------------------------------------- |
-| `/opt/xray-vps-setup/routes/domains.txt` | Один домен на строку  | `netflix.com`, `geosite:netflix`, `regexp:.*\.example$` |
-| `/opt/xray-vps-setup/routes/ips.txt`     | IP или CIDR на строку | `8.8.8.8`, `1.0.0.0/24`, `geoip:us`                     |
+| `/opt/xray-vps-setup/routes/domains.txt` | Один домен на строку  | `yandex.ru`, `geosite:category-ru`, `regexp:.*\.ru$`    |
+| `/opt/xray-vps-setup/routes/ips.txt`     | IP или CIDR на строку | `77.88.8.0/24`, `geoip:ru`                              |
 
-в файле /opt/xray-vps-setup/routes/domains.txt
+Пример содержимого `/opt/xray-vps-setup/routes/domains.txt`:
 
-geosite:google
-geosite:anthropic
-geosite:category-ai-!cn
-geosite:category-ai-cn
-geosite:category-cdn-!cn
-geosite:category-cdn-cn
-geosite:category-container
-geosite:category-dev
-geosite:category-dev-cn
-geosite:spotify
-geosite:stripe
-geosite:telegram
-geosite:z-library
+```
+geosite:category-ru
+geosite:category-gov-ru
+geosite:yandex
+geosite:vk
 
-ifconfig.me
+gosuslugi.ru
+sberbank.ru
+tinkoff.ru
+```
 
-ip.me
-openrouter.ai
-
-Далее отдельно Telegram, Instagram (списки берем тут https://github.com/v2fly/domain-list-community)
+Готовые списки российских сервисов: https://github.com/v2fly/domain-list-community (категории `category-ru`, `category-gov-ru`, `yandex`, `vk` и т. д.).
 
 После редактирования — применить:
 
@@ -231,7 +223,7 @@ apply-routes.sh
 - VPS1 использует steal_oneself с собственным доменом; ACME сертификаты генерируются автоматически
 - Межсерверный канал `VPS2 -> VPS1` вынесен на нестандартный TCP-порт **49321**: это скрытый служебный линк, ему не требуется маскироваться под публичный HTTPS на `:443`
 - **IPv6 полностью отключён** — sysctl на уровне ядра, `apt ForceIPv4`, все wget/curl с флагом `-4`, убраны IPv6-listener из Angie
-- WARP (опционально) — весь трафик не из whitelist идёт через Cloudflare WARP вместо прямого выхода
+- WARP (опционально) — catch-all (всё что не в exclude list) идёт через Cloudflare WARP вместо VPS1
 
 ## Geodata (geosite.dat / geoip.dat)
 

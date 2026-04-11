@@ -83,7 +83,7 @@
     "rules": [
       {"protocol": "bittorrent", "outboundTag": "block"},
       {"ip": ["geoip:private"], "outboundTag": "direct"},
-      {"inboundTag": ["reality-tcp", "xhttp-in"], "outboundTag": "direct"}
+      {"inboundTag": ["reality-tcp", "xhttp-in"], "outboundTag": "chain-vps1"}
     ],
     "domainStrategy": "IPIfNonMatch"
   },

@@ -113,7 +113,7 @@ if [[ ${configure_ssh_input,,} == "y" ]]; then
 fi
 
 configure_warp_input="n"
-read -ep "Enable WARP? (hides VPS2 IP, routes default traffic via Cloudflare) [y/N] "$'\n' configure_warp_input
+read -ep "Enable WARP? (forwards catch-all traffic via Cloudflare WARP instead of VPS1) [y/N] "$'\n' configure_warp_input
 if [[ ${configure_warp_input,,} == "y" ]]; then
   if ! curl -4 -I https://api.cloudflareclient.com --connect-timeout 10 > /dev/null 2>&1; then
     echo "Warp can't be used"
@@ -397,9 +397,9 @@ _warp_install_inner() {
     '.outbounds += {"tag": "warp","protocol": "socks","settings": {"servers": [{"address": "127.0.0.1","port": 40000}]}}' \
     -i "$XRAY_CONFIG_WARP"
 
-  # Switch catch-all inbound rule from direct → warp
+  # Switch catch-all inbound rule outbound (chain-vps1 or direct) → warp
   yq eval \
-    '(.routing.rules[] | select(.outboundTag == "direct") | select(.inboundTag != null)).outboundTag = "warp"' \
+    '(.routing.rules[] | select(.inboundTag != null)).outboundTag = "warp"' \
     -i "$XRAY_CONFIG_WARP"
 
   # Verify the patch actually took effect
@@ -424,45 +424,47 @@ _warp_install_inner() {
   fi
 
   rm -f "$backup"
-  echo "WARP enabled as default outbound"
+  echo "WARP enabled as catch-all outbound (replaces chain-vps1)"
 }
 
 if [[ ${configure_warp_input,,} == "y" ]]; then
   warp_install
 fi
 
-# Create route files for whitelist-based routing (preserve existing on rerun)
+# Create route files for exclude-list routing (preserve existing on rerun)
 mkdir -p /opt/xray-vps-setup/routes
 if [[ ! -f /opt/xray-vps-setup/routes/domains.txt ]]; then
   cat > /opt/xray-vps-setup/routes/domains.txt << 'ROUTES_EOF'
-# Domains to route through VPS1 (Germany)
+# Domains that MUST exit directly from VPS2 (Russian IP)
+# Everything NOT listed here is forwarded through VPS1 (Germany).
 # One per line. Subdomains included automatically.
 # Supported formats:
-#   netflix.com          — matches netflix.com and *.netflix.com
-#   full:exact.com       — exact match only
+#   yandex.ru            — matches yandex.ru and *.yandex.ru
+#   full:exact.ru        — exact match only
 #   regexp:.*\.example$  — regex pattern
-#   geosite:netflix      — from geosite.dat
+#   geosite:category-ru  — from geosite.dat
 #
 # Example:
-# netflix.com
-# youtube.com
-# spotify.com
-# openai.com
+# yandex.ru
+# vk.com
+# gosuslugi.ru
+# sberbank.ru
 ROUTES_EOF
 fi
 
 if [[ ! -f /opt/xray-vps-setup/routes/ips.txt ]]; then
   cat > /opt/xray-vps-setup/routes/ips.txt << 'ROUTES_EOF'
-# IPs/CIDRs to route through VPS1 (Germany)
+# IPs/CIDRs that MUST exit directly from VPS2 (Russian IP)
+# Everything NOT listed here is forwarded through VPS1 (Germany).
 # One per line.
 # Supported formats:
 #   1.2.3.4              — single IP
 #   5.6.7.0/24           — CIDR range
-#   geoip:us             — country from geoip.dat
+#   geoip:ru             — country from geoip.dat
 #
 # Example:
-# 8.8.8.8
-# 1.0.0.0/24
+# geoip:ru
+# 77.88.8.0/24
 ROUTES_EOF
 fi
 
@@ -502,28 +504,33 @@ ips = read_list(os.path.join(routes_dir, "ips.txt"))
 with open(config_path) as f:
     config = json.load(f)
 
-# Detect current default outbound (direct or warp)
-default_tag = "direct"
+# Detect current catch-all outbound (chain-vps1 or warp).
+# Preserves WARP choice across reruns: if WARP is enabled, the catch-all
+# was patched to "warp" and we keep it.
+catchall_tag = "chain-vps1"
 for rule in config.get('routing', {}).get('rules', []):
     if 'inboundTag' in rule:
-        default_tag = rule.get('outboundTag', 'direct')
+        catchall_tag = rule.get('outboundTag', 'chain-vps1')
         break
 
+# Inverted routing:
+#   listed domains/IPs -> direct (exit from VPS2 with Russian IP)
+#   everything else    -> chain-vps1 (forwarded through VPS1 Germany)
 rules = [{"protocol": "bittorrent", "outboundTag": "block"}]
 if domains:
-    rules.append({"domain": format_domains(domains), "outboundTag": "chain-vps1"})
+    rules.append({"domain": format_domains(domains), "outboundTag": "direct"})
 if ips:
-    rules.append({"ip": ips, "outboundTag": "chain-vps1"})
+    rules.append({"ip": ips, "outboundTag": "direct"})
 rules.append({"ip": ["geoip:private"], "outboundTag": "direct"})
-rules.append({"inboundTag": ["reality-tcp", "xhttp-in"], "outboundTag": default_tag})
+rules.append({"inboundTag": ["reality-tcp", "xhttp-in"], "outboundTag": catchall_tag})
 
 config['routing']['rules'] = rules
 
 with open(config_path, 'w') as f:
     json.dump(config, f, indent=2)
 
-print(f"Routes: {len(domains)} domains, {len(ips)} IPs -> chain-vps1")
-print(f"Default outbound: {default_tag}")
+print(f"Routes: {len(domains)} domains, {len(ips)} IPs -> direct (Russia)")
+print(f"Catch-all outbound: {catchall_tag}")
 PYEOF
 
 docker compose -f /opt/xray-vps-setup/docker-compose.yml restart marzban
@@ -565,8 +572,8 @@ echo " Panel user: $MARZBAN_USER"
 echo " Panel pass: $MARZBAN_PASS"
 echo ""
 echo " === Routing ==="
-echo " By default all traffic goes direct from VPS2."
-echo " To route specific sites through VPS1 (Germany):"
+echo " By default all traffic is forwarded through VPS1 (Germany)."
+echo " To pin specific sites to VPS2 direct exit (Russian IP):"
 echo "   1. Edit /opt/xray-vps-setup/routes/domains.txt"
 echo "   2. Edit /opt/xray-vps-setup/routes/ips.txt"
 echo "   3. Run: apply-routes.sh"
