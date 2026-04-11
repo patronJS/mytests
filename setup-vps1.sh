@@ -5,15 +5,20 @@ set -euo pipefail
 # Check if script started as root
 if [ "$EUID" -ne 0 ]
   then echo "Please run as root"
-  exit
+  exit 1
 fi
 
 # Disable IPv6 early — prevents wget/apt hangs on dual-stack hosts
-sysctl -w net.ipv6.conf.all.disable_ipv6=1 > /dev/null
-sysctl -w net.ipv6.conf.default.disable_ipv6=1 > /dev/null
+sysctl -w net.ipv6.conf.all.disable_ipv6=1 >/dev/null 2>&1 || true
+sysctl -w net.ipv6.conf.default.disable_ipv6=1 >/dev/null 2>&1 || true
 
 # Force apt to use IPv4 only
 echo 'Acquire::ForceIPv4 "true";' > /etc/apt/apt.conf.d/99force-ipv4
+
+# Ubuntu 24.04: disable interactive prompts (needrestart menu, debconf dialogs)
+export DEBIAN_FRONTEND=noninteractive
+export NEEDRESTART_MODE=a
+export NEEDRESTART_SUSPEND=1
 
 # Install dependencies
 apt-get update
@@ -34,6 +39,9 @@ fetch_template() {
 
 # Read domain input
 read -ep "Enter VPS1 domain:"$'\n' input_domain
+while [[ -z "${input_domain// }" ]]; do
+  read -ep "Domain cannot be empty. Enter VPS1 domain:"$'\n' input_domain
+done
 
 export VPS1_DOMAIN=$(echo "$input_domain" | idn)
 export VLESS_DOMAIN="$VPS1_DOMAIN"
@@ -103,7 +111,7 @@ docker_install() {
   curl -4 -fsSL https://get.docker.com | sh
 }
 
-if ! command -v docker 2>&1 >/dev/null; then
+if ! command -v docker >/dev/null 2>&1; then
     docker_install
 fi
 # Restart Docker to pick up disabled IPv6
@@ -114,11 +122,13 @@ export ARCH=$(dpkg --print-architecture)
 
 YQ_VERSION="v4.52.5"
 yq_install() {
-  wget -4 -q "https://github.com/mikefarah/yq/releases/download/$YQ_VERSION/yq_linux_$ARCH" -O /usr/bin/yq
+  wget -4 -q "https://github.com/mikefarah/yq/releases/download/$YQ_VERSION/yq_linux_$ARCH" -O /usr/local/bin/yq
   wget -4 -qO /tmp/yq_checksums "https://github.com/mikefarah/yq/releases/download/$YQ_VERSION/checksums"
+  [[ -s /tmp/yq_checksums ]] || { echo "ERROR: yq checksums download failed or empty"; rm -f /usr/local/bin/yq; exit 1; }
   YQ_SHA256=$(grep "yq_linux_$ARCH " /tmp/yq_checksums | awk '{print $19}')
-  echo "$YQ_SHA256  /usr/bin/yq" | sha256sum -c - || { echo "yq checksum verification failed"; rm -f /usr/bin/yq; exit 1; }
-  chmod +x /usr/bin/yq
+  [[ -n "$YQ_SHA256" ]] || { echo "ERROR: yq checksum not found for yq_linux_$ARCH"; rm -f /usr/local/bin/yq; exit 1; }
+  echo "$YQ_SHA256  /usr/local/bin/yq" | sha256sum -c - || { echo "yq checksum verification failed"; rm -f /usr/local/bin/yq; exit 1; }
+  chmod +x /usr/local/bin/yq
   rm -f /tmp/yq_checksums
 }
 
@@ -137,6 +147,7 @@ sysctl -p > /dev/null
 export XRAY_PIK=$(docker run --rm ghcr.io/xtls/xray-core:${XRAY_VERSION#v} x25519 | grep 'PrivateKey' | awk '{print $NF}')
 export XRAY_PBK=$(docker run --rm ghcr.io/xtls/xray-core:${XRAY_VERSION#v} x25519 -i "$XRAY_PIK" | grep 'PublicKey' | awk '{print $NF}')
 export UUID_LINK=$(docker run --rm ghcr.io/xtls/xray-core:${XRAY_VERSION#v} uuid)
+[[ -n "$XRAY_PIK" && -n "$XRAY_PBK" && -n "$UUID_LINK" ]] || { echo "ERROR: xray key/uuid generation failed — check 'xray x25519' output format"; exit 1; }
 export XHTTP_PATH=$(openssl rand -hex 12)
 export SID1=$(openssl rand -hex 2)
 export SID2=$(openssl rand -hex 4)
@@ -144,17 +155,22 @@ export SID3=$(openssl rand -hex 6)
 export SID4=$(openssl rand -hex 8)
 export SHORT_IDS="\"$SID1\",\"$SID2\",\"$SID3\",\"$SID4\""
 export SHORT_ID=$SID4
-export MARZBAN_USER=$(grep -E '^[a-z]{4,6}$' /usr/share/dict/words | shuf -n 1)
+export MARZBAN_USER=$(grep -E '^[a-z]{4,6}$' /usr/share/dict/words 2>/dev/null | shuf -n 1)
+[[ -n "$MARZBAN_USER" ]] || export MARZBAN_USER="adm$(openssl rand -hex 3)"
 export MARZBAN_PASS=$(tr -dc A-Za-z0-9 </dev/urandom | head -c 13; echo)
 export MARZBAN_PATH=$(openssl rand -hex 8)
 export MARZBAN_SUB_PATH=$(openssl rand -hex 8)
 
 # Download XRay core
 mkdir -p /opt/xray-vps-setup/marzban/xray-core
+rm -f /tmp/xray.zip
 if [[ "$ARCH" == "amd64" ]]; then
   wget -4 -O /tmp/xray.zip https://github.com/XTLS/Xray-core/releases/download/$XRAY_VERSION/Xray-linux-64.zip
 elif [[ "$ARCH" == "arm64" ]]; then
   wget -4 -O /tmp/xray.zip https://github.com/XTLS/Xray-core/releases/download/$XRAY_VERSION/Xray-linux-arm64-v8a.zip
+else
+  echo "ERROR: Unsupported architecture: $ARCH. Supported: amd64, arm64."
+  exit 1
 fi
 unzip -qo /tmp/xray.zip -d /opt/xray-vps-setup/marzban/xray-core
 
@@ -207,8 +223,18 @@ fi
 if [[ ${configure_ssh_input,,} == "y" && -n "${input_ssh_port:-}" ]]; then
   export SSH_PORT="${input_ssh_port}"
 else
-  export SSH_PORT=$(ss -tlnp | grep sshd | grep -Po '(?<=:)\d+(?= )' | head -n 1)
+  # Ubuntu 24.04 default is socket-activated ssh — sshd is not always listening, so
+  # ss -tlnp may show "systemd" instead of "sshd". Try the socket unit first, then ss.
+  SSH_PORT=""
+  if systemctl is-enabled ssh.socket &>/dev/null; then
+    listen_val=$(systemctl show ssh.socket -p Listen --value 2>/dev/null)
+    [[ "$listen_val" =~ :([0-9]+) ]] && SSH_PORT="${BASH_REMATCH[1]}"
+  fi
+  if [[ -z "$SSH_PORT" ]]; then
+    SSH_PORT=$(ss -tlnp 2>/dev/null | grep sshd | grep -Po '(?<=:)\d+(?= )' | head -n 1)
+  fi
   SSH_PORT=${SSH_PORT:-22}
+  export SSH_PORT
 fi
 
 debconf-set-selections <<EOF
@@ -269,17 +295,36 @@ fi
 export SSH_USER SSH_USER_PASS
 
 sshd_edit() {
-  # Preflight: refuse if the chosen port is bound by anything other than sshd itself
+  # Preflight: refuse if the chosen port is bound by anything other than sshd itself.
+  # On Ubuntu 24.04, ssh.socket holds the port as "systemd" — tolerated if it's our own
+  # ssh.socket on the same port (we transition it to ssh.service below).
   if ss -tlnp 2>/dev/null | grep -E ":${SSH_PORT}[[:space:]]" | grep -qv '"sshd"'; then
-    echo "ERROR: port $SSH_PORT is already bound by another service:"
-    ss -tlnp | grep -E ":${SSH_PORT}[[:space:]]" || true
-    echo "Choose a different port or stop that service, then rerun."
-    exit 1
+    local is_own_ssh_socket=0
+    if systemctl is-enabled ssh.socket &>/dev/null; then
+      local listen_val socket_port=""
+      listen_val=$(systemctl show ssh.socket -p Listen --value 2>/dev/null)
+      [[ "$listen_val" =~ :([0-9]+) ]] && socket_port="${BASH_REMATCH[1]}"
+      [[ "$socket_port" == "$SSH_PORT" ]] && is_own_ssh_socket=1
+    fi
+    if (( is_own_ssh_socket == 0 )); then
+      echo "ERROR: port $SSH_PORT is already bound by another service:"
+      ss -tlnp | grep -E ":${SSH_PORT}[[:space:]]" || true
+      echo "Choose a different port or stop that service, then rerun."
+      exit 1
+    fi
   fi
   fetch_template "00-disable-password" | envsubst > /etc/ssh/sshd_config.d/00-disable-password.conf
   sshd -t || { echo "ERROR: sshd config test failed — reverting"; rm -f /etc/ssh/sshd_config.d/00-disable-password.conf; exit 1; }
+  # Ubuntu 24.04: ssh is socket-activated via ssh.socket by default; ListenStream= in
+  # the socket unit overrides the Port directive from sshd_config.d. Switch to plain
+  # ssh.service so our new port actually takes effect.
+  if systemctl is-enabled ssh.socket &>/dev/null; then
+    echo "Transitioning ssh.socket -> ssh.service (Ubuntu 24.04 default)..."
+    systemctl disable --now ssh.socket
+    systemctl enable ssh.service
+  fi
   systemctl daemon-reload
-  systemctl restart ssh
+  systemctl restart ssh.service
 }
 
 add_user() {

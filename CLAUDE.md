@@ -2,6 +2,23 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## Target Environment — MANDATORY
+
+**All scripts, templates, and configuration in this repository MUST target Ubuntu 24.04 LTS (noble) exclusively.**
+
+- Write and verify every change specifically against noble. Do NOT assume Debian 12 / Ubuntu 22.04 / generic Linux.
+- When reviewing code, always ask: "does this work on Ubuntu 24.04 noble as deployed on a fresh cloud VPS?"
+- When adding dependencies, confirm they are in noble repos (main/universe enabled by default on cloud images).
+- Any noble-specific gotchas MUST be handled explicitly. Known ones:
+  - **`ssh.socket` is the default unit on noble** — socket-activated. `ListenStream=` in `ssh.socket` overrides `Port` from `sshd_config.d/*.conf`. Any script that changes the SSH port MUST transition `ssh.socket` → `ssh.service` (`systemctl disable --now ssh.socket && systemctl enable ssh.service`), otherwise the new port is silently ignored.
+  - **`needrestart` ships by default** and shows interactive dialogs during `apt-get install` on libc/kernel updates. Always export `DEBIAN_FRONTEND=noninteractive`, `NEEDRESTART_MODE=a`, `NEEDRESTART_SUSPEND=1` before any apt operation in a non-interactive context.
+  - **`iptables` is `iptables-nft` wrapper** by default. Legacy `iptables -A/-C/-P` commands still work; `iptables-persistent` saves via nft backend. Long-term, prefer native `nft` syntax — but don't rewrite working scripts without a reason.
+  - **Locally installed binaries go to `/usr/local/bin`**, not `/usr/bin` (FHS; `/usr/bin` is reserved for dpkg-managed packages).
+  - **SSH port detection** must handle socket-activated ssh: read from `systemctl show ssh.socket -p Listen --value`, not just `ss -tlnp | grep sshd` (which misses socket-activated setups where sshd isn't listening until a connection arrives).
+  - **`idn` package** is in `universe` — enabled by default on cloud noble images. If you add new deps, verify they are not in a disabled component.
+  - **`wamerican`** pulls in `dictionaries-common` which creates `/usr/share/dict/words` via `update-alternatives`.
+- Do NOT add backwards-compat shims for older Ubuntu/Debian. Single-target only.
+
 ## Project Overview
 
 Two-VPS cascade architecture for VLESS proxy (XRay/Marzban) with REALITY protocol, designed to bypass DPI.
