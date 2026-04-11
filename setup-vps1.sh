@@ -352,7 +352,7 @@ fi
 echo " Panel user: $MARZBAN_USER"
 echo " Panel pass: $MARZBAN_PASS"
 echo ""
-echo " === Values for setup-entry.sh ==="
+echo " === Values for setup-vps2.sh ==="
 echo " VPS1_IP:         $(hostname -I | awk '{print $1}')"
 echo " VPS1_PBK:        $XRAY_PBK"
 echo " VPS1_SHORT_ID:   $SHORT_ID"

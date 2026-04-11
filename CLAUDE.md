@@ -12,7 +12,7 @@ VPS1 (exit, Marzban panel, no domain) + VPS2 (entry, independent Marzban panel).
 
 ### Delivery mechanism
 
-Two bash scripts (`setup-panel.sh` for VPS1, `setup-entry.sh` for VPS2) — download config templates from `templates_for_script/` via raw GitHub URLs, use `envsubst` for templating. Produce Docker Compose stacks in `/opt/xray-vps-setup/` with XRay/Marzban containers using `network_mode: host`.
+Two bash scripts (`setup-vps1.sh` for VPS1, `setup-vps2.sh` for VPS2) — download config templates from `templates_for_script/` via raw GitHub URLs, use `envsubst` for templating. Produce Docker Compose stacks in `/opt/xray-vps-setup/` with XRay/Marzban containers using `network_mode: host`.
 
 ### Traffic flow
 
@@ -20,8 +20,8 @@ Two bash scripts (`setup-panel.sh` for VPS1, `setup-entry.sh` for VPS2) — down
 Client → VPS2:443 (VLESS+REALITY, steal_oneself) → XHTTP+REALITY (packet-up) → VPS1:49321 (steal_oneself) → Internet
 ```
 
-- `setup-panel.sh` — VPS1 installer (Marzban panel + XHTTP inbound on 49321, no domain required)
-- `setup-entry.sh` — VPS2 installer (Marzban panel + steal_oneself + chain outbound)
+- `setup-vps1.sh` — VPS1 installer (Marzban panel + XHTTP inbound on 49321, no domain required)
+- `setup-vps2.sh` — VPS2 installer (Marzban panel + steal_oneself + chain outbound)
 
 XRay on VPS1 listens on 49321, handles VLESS with REALITY (steal_oneself with own domain + Angie). VPS1 Marzban panel is accessible via SSH tunnel only.
 
@@ -36,12 +36,12 @@ Scripts generate at runtime: x25519 key pairs (PIK/PBK), XRay UUIDs, admin crede
 ```bash
 # 1. On VPS1 (Germany):
 tmux
-bash <(wget -qO- https://raw.githubusercontent.com/patronJS/mytests/refs/heads/main/setup-panel.sh)
+bash <(wget -qO- https://raw.githubusercontent.com/patronJS/mytests/refs/heads/main/setup-vps1.sh)
 # Copy the output values
 
 # 2. On VPS2 (Russia):
 tmux
-bash <(wget -qO- https://raw.githubusercontent.com/patronJS/mytests/refs/heads/main/setup-entry.sh)
+bash <(wget -qO- https://raw.githubusercontent.com/patronJS/mytests/refs/heads/main/setup-vps2.sh)
 # Paste VPS1 values when prompted
 ```
 

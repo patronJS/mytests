@@ -72,7 +72,7 @@ apt-get update && apt-get install tmux -y
 tmux
 sysctl -w net.ipv6.conf.all.disable_ipv6=1
 sysctl -w net.ipv6.conf.default.disable_ipv6=1
-bash <(wget -qO- https://raw.githubusercontent.com/patronJS/mytests/refs/heads/main/setup-panel.sh)
+bash <(wget -qO- https://raw.githubusercontent.com/patronJS/mytests/refs/heads/main/setup-vps1.sh)
 ```
 
 Скрипт задаст вопросы:
@@ -94,7 +94,7 @@ bash <(wget -qO- https://raw.githubusercontent.com/patronJS/mytests/refs/heads/m
    ssh -L 8000:localhost:8000 root@<VPS1_IP>
    http://localhost:8000/<random_path>
 
- === Values for setup-entry.sh ===
+ === Values for setup-vps2.sh ===
  VPS1_IP:        <ip>
  VPS1_PBK:       <public_key>
  VPS1_SHORT_ID:  <hex>
@@ -114,7 +114,7 @@ apt-get update && apt-get install tmux -y
 tmux
 sysctl -w net.ipv6.conf.all.disable_ipv6=1
 sysctl -w net.ipv6.conf.default.disable_ipv6=1
-bash <(wget -qO- https://raw.githubusercontent.com/patronJS/mytests/refs/heads/main/setup-entry.sh)
+bash <(wget -qO- https://raw.githubusercontent.com/patronJS/mytests/refs/heads/main/setup-vps2.sh)
 ```
 
 Скрипт задаст вопросы — отвечайте, используя данные из вывода шага 2:
@@ -151,7 +151,7 @@ disable-warp.sh
 
 ### Шаг 4. Подключение клиентов
 
-Управление пользователями ведётся через **панель VPS2**. URL и учётные данные выводятся в конце `setup-entry.sh`.
+Управление пользователями ведётся через **панель VPS2**. URL и учётные данные выводятся в конце `setup-vps2.sh`.
 
 **VLESS:**
 
