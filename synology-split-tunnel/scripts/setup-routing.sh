@@ -1,5 +1,9 @@
 #!/bin/sh
 
+# Clean up stale tun0 from a previous crash / restart
+ip link set tun0 down 2>/dev/null || true
+ip link delete tun0 2>/dev/null || true
+
 echo "[routing] waiting for wg0..."
 while ! ip link show wg0 >/dev/null 2>&1; do
     sleep 2
@@ -50,7 +54,8 @@ else
     echo "[routing] WARNING: iptables not available"
 fi
 
-# --- policy routing (clean up duplicates from previous runs) ---
+# --- policy routing (clean up stale state from previous runs) ---
+ip route flush table 100 2>/dev/null || true
 ip rule del iif wg0 table 100 priority 100 2>/dev/null || true
 ip rule add iif wg0 table 100 priority 100 2>/dev/null || true
 
