@@ -10,13 +10,21 @@ services:
       - WG_ALLOWED_IPS=0.0.0.0/0
       - WG_PERSISTENT_KEEPALIVE=25
       - INSECURE=true
+      - DISABLE_IPV6=true
     volumes:
       - ./wg-data:/etc/wireguard
       - ./scripts/ip6tables-stub.sh:/usr/sbin/ip6tables:ro
-    network_mode: host
+    ports:
+      - "51820:51820/udp"
+      - "51821:51821/tcp"
     cap_add:
       - NET_ADMIN
       - SYS_MODULE
+    sysctls:
+      - net.ipv4.ip_forward=1
+      - net.ipv4.conf.all.src_valid_mark=1
+      - net.ipv6.conf.all.disable_ipv6=0
+      - net.ipv6.conf.default.disable_ipv6=0
     restart: unless-stopped
 
   sing-box:
