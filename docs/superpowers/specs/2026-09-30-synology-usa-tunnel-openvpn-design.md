@@ -2,6 +2,9 @@
 
 - **Status:** approved in brainstorming (2026-09-30), pending written-spec review
 - **Scope:** `Synology-USA-tunnel/` only. `synology-split-tunnel/` and the VPS installers are untouched.
+- **Target platform:** Synology DSM + Docker (Alpine-based images), by the user's explicit
+  decision. The repository's Ubuntu 24.04 rule is scoped to the VPS installers (`CLAUDE.md`
+  updated accordingly on the user's request).
 - **Reference:** `/Users/csscoder/Development/LOCAL_PRJ_AI/16_worked_proxy_chain` (working
   VLESS → OpenVPN chain via `socks-proxy`; reused ideas, not files).
 
@@ -56,8 +59,11 @@ Mikrotik ──WG──▶ wg0 ─┐   shared netns (owner: wg-easy)
                                                      VLESS server → OpenVPN server (USA) → internet
 ```
 
-The main routing table is never changed: sing-box's own connection to the VLESS server
-leaves via `eth0`. Only traffic arriving on `wg0` is policy-routed into `tun0`.
+OpenVPN adds no routes to the main table: its existing routes, its default route and the
+path to the VLESS server stay as they are, so sing-box's own connection to the VLESS server
+leaves via `eth0`. The only main-table change is the kernel's connected route for the
+`tun0` subnet, created when the tunnel address is assigned. Only traffic arriving on `wg0`
+is policy-routed into `tun0`.
 
 ### Containers
 
@@ -145,10 +151,15 @@ server requires it.
 
 1. `/setup-routing.sh || exit 1` — kill switch, forwarding, iptables, LAN routes.
 2. Profile discovery: exactly one `/openvpn/*.ovpn`; 0 or >1 → `ERROR`, exit 1.
-3. Validation, each failure → `ERROR` + exit 1:
-   - a `proto tcp*` line (`tcp`, `tcp-client`, `tcp4-client`, …) or a `remote HOST PORT tcp*`
-     suffix is present; otherwise the profile is rejected (`socks-proxy` is TCP-only; UDP
-     would bypass VLESS).
+3. Validation, each failure → `ERROR` + exit 1. Supported format: a flat profile with
+   inline or file-based certificates; anything the checks cannot reason about is rejected.
+   - At least one `remote` line. Every `remote` host is a numeric IPv4 address; hostnames
+     are rejected (resolving one locally would send a DNS query to the ISP outside VLESS).
+   - Effective transport is TCP for every remote: each `remote` line has either no protocol
+     suffix or a `tcp*` suffix; if any `remote` line has no suffix, a `proto tcp*` line
+     (`tcp`, `tcp-client`, `tcp4-client`, …) must be present. Any `udp*` suffix or a missing
+     TCP `proto` is rejected (`socks-proxy` is TCP-only; UDP would bypass VLESS).
+   - `<connection>` blocks and `config` includes are rejected (their semantics are not parsed).
    - If the profile contains `auth-user-pass`, `/openvpn/cred.txt` must exist.
 4. Build `/tmp/run.ovpn` from the profile (source file never modified):
    - drop lines: `dev`, `dev-type`, `up`, `down`, `script-security`, `route-up`,
@@ -159,14 +170,20 @@ server requires it.
      dev-type tun
      socks-proxy 127.0.0.1 1080
      route-nopull
+     route-noexec
      script-security 2
      route-up /route-up.sh
      auth-user-pass /openvpn/cred.txt   # only if the profile had auth-user-pass
      ```
-5. `exec openvpn --config /tmp/run.ovpn`.
+5. `cd /openvpn && exec openvpn --config /tmp/run.ovpn`. The working directory makes
+   relative `ca`/`cert`/`key`/`tls-auth` paths resolve next to the profile.
 
-`route-nopull` ignores server-pushed routes including `redirect-gateway`; otherwise the
-whole namespace (and sing-box's own VLESS connection) would be sent into `tun0` — a loop.
+`route-nopull` ignores server-pushed routes including `redirect-gateway`; `route-noexec`
+stops OpenVPN from installing any route at all, including `route` lines inside the profile.
+Otherwise the whole namespace (and sing-box's own VLESS connection) could be sent into
+`tun0` — a loop. Apart from the kernel's connected route for the `tun0` subnet (created
+by address assignment, not by OpenVPN's route logic), the only route the session
+contributes is the one `route-up.sh` writes into table 100.
 
 ### route-up.sh
 
@@ -179,11 +196,14 @@ the route if OpenVPN recreated `tun0`.
 
 Same as the current copy except:
 
-- the background tun0 loop is removed (moved to `route-up.sh`);
+- the background tun0 loop is removed (moved to `route-up.sh`); its
+  `net.ipv4.conf.wg0.rp_filter=0` step stays in `setup-routing.sh`, executed after `wg0`
+  appears (changing `all`/`default` does not reset an existing interface's value);
 - the iptables section no longer installs packages at runtime (`iptables` is in the image;
-  prefer `iptables-legacy` when present, as today). If no iptables binary is found →
-  `ERROR`, exit 1, because MASQUERADE on `tun0` is now required (the OpenVPN server only
-  accepts packets from its assigned client IP).
+  prefer `iptables-legacy` when present, as today). MASQUERADE on `tun0` is now required
+  (the OpenVPN server only accepts packets from its assigned client IP), so a missing
+  iptables binary, or a failure to add any of the FORWARD/MASQUERADE rules → `ERROR`,
+  exit 1 (no success message after a failed rule).
 
 Kept unchanged: kill switch first (idempotent, fail closed with `ip_forward=0`), stale
 `tun0` cleanup, rp_filter sysctls, `ip_forward=1` after the kill switch, LAN routes in
@@ -221,12 +241,15 @@ The rule: traffic from `wg0` never leaves via `eth0`.
    value. Cases: first start (wg0 before script) blocked; steady state (tun0 up → via tun0,
    LAN → wg0); tun0 gone → blocked; rerun with 0 leaks and single rule/route; fail closed
    (ip_forward 1 → 0); route restored by `route-up.sh` after tun0 is recreated; missing
-   iptables → exit 1.
+   iptables → exit 1; iptables present but adding MASQUERADE fails → exit 1; `wg0`
+   created with `rp_filter=1` → 0 after the script.
 2. `test-entrypoint.sh` — runs the profile preparation against sample profiles and asserts:
    `dev tun` → `dev tun0`; `up`/`down`/`script-security`/`redirect-gateway` stripped;
-   `socks-proxy`, `route-nopull`, `route-up` appended; `auth-user-pass` rewritten when
-   `cred.txt` exists; UDP profile rejected; `auth-user-pass` without `cred.txt` rejected;
-   0 or 2 profiles rejected. Test hook: with `OVPN_DRY_RUN=1` the entrypoint skips
+   `socks-proxy`, `route-nopull`, `route-noexec`, `route-up` appended; `auth-user-pass`
+   rewritten when `cred.txt` exists. Rejected: `proto udp`; `proto tcp-client` with
+   `remote IP PORT udp`; mixed TCP/UDP remotes; hostname `remote`; no `remote`;
+   `<connection>` block; `config` include; `auth-user-pass` without `cred.txt`; 0 or 2
+   profiles. Test hook: with `OVPN_DRY_RUN=1` the entrypoint skips
    `setup-routing.sh`, prints `/tmp/run.ovpn` and exits 0 instead of `exec openvpn`, so
    this test needs no privileges.
 
@@ -243,8 +266,11 @@ network namespace (`10.8.0.2`, default via `10.8.0.1`). WireGuard itself is not 
 - `docker stop sing-box` → client requests fail (no fallback to the host IP);
 - `docker stop openvpn` → client requests fail;
 - after restarts the exit IP returns;
-- whether OpenVPN resolves a hostname `remote` locally (DNS visible to the ISP) — record
-  the result in README.
+- `route-up.sh` fires with `route-noexec` (table 100 gets `default dev tun0`); after
+  connect, the main table keeps all pre-existing routes and its default route, the route
+  to the VLESS server IP still resolves via `eth0`, and the only added route is the
+  connected route of the `tun0` subnet — also with a profile that contains a `route` line
+  to the VLESS server IP.
 
 Secrets stay in a scratch directory outside the repository.
 
@@ -259,10 +285,12 @@ Secrets stay in a scratch directory outside the repository.
 
 1. Exit IP of `vpn-clients` traffic equals the OpenVPN server IP.
 2. No path from `wg0` to `eth0` at any time (startup, sing-box down, OpenVPN down, reruns).
-3. UDP profiles and missing credentials fail loudly at start.
+3. UDP or mixed-transport profiles, hostname remotes, unsupported constructs
+   (`<connection>`, `config`) and missing credentials fail loudly at start.
 4. User secrets (`openvpn/*`, real `sing-box/config.json` values) are never committed.
 5. All automated tests pass; `docker compose config -q` and `shellcheck` are clean.
-6. README documents setup (where to put the profile), recovery commands, and diagnostics.
+6. README documents setup (where to put the profile and its companion files, IP-only
+   `remote`), recovery commands, and diagnostics.
 
 ## Risks and open items
 
@@ -270,8 +298,6 @@ Secrets stay in a scratch directory outside the repository.
   `iptables-legacy`. Cannot be verified locally — check `docker logs openvpn` on first run.
 - **TCP-over-TCP.** OpenVPN/TCP inside VLESS/TCP degrades under packet loss; inherent to
   the chosen transport.
-- **Hostname in `remote`.** Possible DNS query to the ISP; verified in the e2e test and
-  documented.
 - **MTU/MSS.** Not tuned; Mikrotik MSS clamping stays. Add `mssfix` only if breakage is
   observed.
 

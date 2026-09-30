@@ -4,7 +4,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Target Environment — MANDATORY
 
-**All scripts, templates, and configuration in this repository MUST target Ubuntu 24.04 LTS (noble) exclusively.**
+**The VPS installers (`setup-vps1.sh`, `setup-vps2.sh`), their templates (`templates_for_script/`) and the configuration they produce MUST target Ubuntu 24.04 LTS (noble) exclusively.**
+
+- Scope: this rule does NOT apply to the home-network subprojects — `synology-split-tunnel/` and `Synology-USA-tunnel/` target Synology DSM with Docker images (Alpine-based), `OpenWrt/` targets OpenWrt.
 
 - Write and verify every change specifically against noble. Do NOT assume Debian 12 / Ubuntu 22.04 / generic Linux.
 - When reviewing code, always ask: "does this work on Ubuntu 24.04 noble as deployed on a fresh cloud VPS?"
