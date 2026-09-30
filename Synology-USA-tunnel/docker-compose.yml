@@ -1,0 +1,46 @@
+services:
+  wg-easy:
+    image: ghcr.io/wg-easy/wg-easy:15.2.2
+    container_name: wg-easy
+    # wg-easy v15 ignores WG_* vars: host, port, DNS, allowed IPs and
+    # keepalive live in the Web UI (Admin Panel), stored in ./wg-data.
+    environment:
+      - INSECURE=true
+      - DISABLE_IPV6=true
+    volumes:
+      - ./wg-data:/etc/wireguard
+      - ./scripts/ip6tables-stub.sh:/usr/sbin/ip6tables:ro
+    ports:
+      - "51820:51820/udp"
+      - "51821:51821/tcp"
+    cap_add:
+      - NET_ADMIN
+      - SYS_MODULE
+    sysctls:
+      # Forwarding starts OFF: sing-box's setup-routing.sh enables it only after
+      # the kill switch is installed, so wg0 can never egress via eth0 before it.
+      - net.ipv4.ip_forward=0
+      - net.ipv4.conf.all.src_valid_mark=1
+      - net.ipv6.conf.all.disable_ipv6=0
+      - net.ipv6.conf.default.disable_ipv6=0
+    restart: unless-stopped
+
+  sing-box:
+    image: ghcr.io/sagernet/sing-box:v1.13.6
+    container_name: sing-box
+    volumes:
+      - ./sing-box:/etc/sing-box:ro
+      - ./scripts/setup-routing.sh:/setup-routing.sh:ro
+    devices:
+      - /dev/net/tun:/dev/net/tun
+    privileged: true
+    network_mode: "service:wg-easy"
+    depends_on:
+      - wg-easy
+    restart: unless-stopped
+    entrypoint:
+      - /bin/sh
+      - -c
+      - |
+        /setup-routing.sh 2>&1 || exit 1
+        exec sing-box run -c /etc/sing-box/config.json
