@@ -6,13 +6,10 @@
 
   "inbounds": [
     {
-      "type": "tun",
-      "tag": "tun-in",
-      "interface_name": "tun0",
-      "address": ["198.18.0.1/15"],
-      "mtu": 1500,
-      "auto_route": false,
-      "stack": "gvisor"
+      "type": "mixed",
+      "tag": "socks-in",
+      "listen": "127.0.0.1",
+      "listen_port": 1080
     }
   ],
 
@@ -25,7 +22,7 @@
       "uuid": "<YOUR_UUID>",
       "tls": {
         "enabled": true,
-        "server_name": "yandex.ru",
+        "server_name": "<YOUR_SNI>",
         "reality": {
           "enabled": true,
           "public_key": "<YOUR_REALITY_PUBLIC_KEY>",
@@ -40,7 +37,6 @@
   ],
 
   "route": {
-    "final": "proxy",
-    "auto_detect_interface": true
+    "final": "proxy"
   }
 }

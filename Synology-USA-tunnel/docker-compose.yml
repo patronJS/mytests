@@ -17,30 +17,44 @@ services:
       - NET_ADMIN
       - SYS_MODULE
     sysctls:
-      # Forwarding starts OFF: sing-box's setup-routing.sh enables it only after
-      # the kill switch is installed, so wg0 can never egress via eth0 before it.
+      # Forwarding starts OFF: the openvpn container's setup-routing.sh enables
+      # it only after the kill switch is installed, so wg0 can never egress via
+      # eth0 before it.
       - net.ipv4.ip_forward=0
       - net.ipv4.conf.all.src_valid_mark=1
       - net.ipv6.conf.all.disable_ipv6=0
       - net.ipv6.conf.default.disable_ipv6=0
     restart: unless-stopped
 
+  # Local SOCKS (127.0.0.1:1080) -> VLESS+Reality. Plain proxy: no TUN, no
+  # routing changes; its own connection leaves via eth0 (main table).
   sing-box:
     image: ghcr.io/sagernet/sing-box:v1.13.6
     container_name: sing-box
+    command: ["run", "-c", "/etc/sing-box/config.json"]
     volumes:
       - ./sing-box:/etc/sing-box:ro
-      - ./scripts/setup-routing.sh:/setup-routing.sh:ro
-    devices:
-      - /dev/net/tun:/dev/net/tun
-    privileged: true
     network_mode: "service:wg-easy"
     depends_on:
       - wg-easy
     restart: unless-stopped
-    entrypoint:
-      - /bin/sh
-      - -c
-      - |
-        /setup-routing.sh 2>&1 || exit 1
-        exec sing-box run -c /etc/sing-box/config.json
+
+  # OpenVPN client (tun0) whose TCP connection goes through sing-box's SOCKS.
+  # Runs setup-routing.sh (kill switch, forwarding, NAT); route-up.sh points
+  # table 100 (wg0 traffic) at tun0 after every connect.
+  openvpn:
+    build: ./openvpn-client
+    image: usa-tunnel-openvpn
+    container_name: openvpn
+    volumes:
+      - ./openvpn:/openvpn:ro
+      - ./scripts/setup-routing.sh:/setup-routing.sh:ro
+    devices:
+      - /dev/net/tun:/dev/net/tun
+    # Writes /proc/sys (ip_forward, rp_filter) in the shared namespace.
+    privileged: true
+    network_mode: "service:wg-easy"
+    depends_on:
+      - wg-easy
+      - sing-box
+    restart: unless-stopped

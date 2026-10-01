@@ -3,3 +3,5 @@ ansible.cfg
 inventory.yml
 playbook.yml
 .mcp.json
+Synology-USA-tunnel/openvpn/*
+!Synology-USA-tunnel/openvpn/.gitkeep
