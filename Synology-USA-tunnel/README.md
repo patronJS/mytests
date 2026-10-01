@@ -108,6 +108,19 @@ cd /volume1/docker/synology-split-tunnel
 docker compose stop
 ```
 
+Политика перезапуска задаётся при создании контейнера, поэтому уже развёрнутый VLESS-стек нужно один раз пересоздать: скопировать на Synology обновлённый `synology-split-tunnel/docker-compose.yml` (там `restart: "no"`) и выполнить
+
+```bash
+cd /volume1/docker/synology-split-tunnel
+docker compose up --no-start    # пересоздаёт контейнеры, не запуская их
+```
+
+Проверка после запуска USA-стека (шаг 5) — `no` у двух VLESS-контейнеров и `always` у трёх USA-контейнеров:
+
+```bash
+docker inspect -f '{{.Name}} {{.HostConfig.RestartPolicy.Name}}' wg-easy sing-box wg-easy-usa sing-box-usa openvpn-usa
+```
+
 Чтобы Mikrotik-пир подключался к обоим стекам без перенастройки, ключи WireGuard должны быть одинаковыми: скопировать `wg-data/` из `synology-split-tunnel` в `Synology-USA-tunnel`. Настройки WireGuard (Host, Port, DNS, Allowed IPs, Keepalive) в wg-easy v15 задаются в Web UI и хранятся в `wg-data/`.
 
 ### 5. Запуск

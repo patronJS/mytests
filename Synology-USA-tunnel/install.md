@@ -40,6 +40,19 @@ cd /volume1/docker/synology-split-tunnel
 docker compose stop
 ```
 
+Один раз пересоздать VLESS-стек, чтобы он перестал стартовать сам: скопировать на Synology обновлённый `synology-split-tunnel/docker-compose.yml` (там `restart: "no"`) и выполнить
+
+```bash
+cd /volume1/docker/synology-split-tunnel
+docker compose up --no-start    # пересоздаёт контейнеры, не запуская их
+```
+
+После запуска (шаг 4) проверить: `no` у VLESS-контейнеров, `always` у USA:
+
+```bash
+docker inspect -f '{{.Name}} {{.HostConfig.RestartPolicy.Name}}' wg-easy sing-box wg-easy-usa sing-box-usa openvpn-usa
+```
+
 Чтобы Mikrotik подключался к обоим стекам без перенастройки, скопировать `wg-data/` из `synology-split-tunnel` в `Synology-USA-tunnel` (одинаковые ключи WireGuard).
 
 Если при запуске ошибка `The container name "/wg-easy" is already in use` — у вас старая версия этого стека; обновить файлы и повторить.
