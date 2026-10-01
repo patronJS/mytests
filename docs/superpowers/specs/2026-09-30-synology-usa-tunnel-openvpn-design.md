@@ -1,7 +1,10 @@
 # Design: Synology-USA-tunnel — WireGuard → VLESS → OpenVPN chain
 
 - **Status:** approved in brainstorming (2026-09-30), pending written-spec review
-- **Scope:** `Synology-USA-tunnel/` only. `synology-split-tunnel/` and the VPS installers are untouched.
+- **Scope:** `Synology-USA-tunnel/`. In `synology-split-tunnel/` only the `restart:` policy
+  changes (see "Coexistence with synology-split-tunnel"). The VPS installers are untouched.
+- **Amended 2026-10-01:** coexistence with `synology-split-tunnel` (decision 4, container
+  names, restart policy).
 - **Target platform:** Synology DSM + Docker (Alpine-based images), by the user's explicit
   decision. The repository's Ubuntu 24.04 rule is scoped to the VPS installers (`CLAUDE.md`
   updated accordingly on the user's request).
@@ -38,8 +41,11 @@ VLESS is the outer layer. The VLESS server is a plain relay and needs no changes
 2. Approach A: OpenVPN client runs on the Synology in the shared wg-easy network namespace;
    sing-box becomes a local SOCKS → VLESS relay (no TUN).
 3. OpenVPN client stays on the Synology (not on the VLESS server).
-4. Ports and container names of wg-easy stay as in `synology-split-tunnel` (51820/udp,
-   51821/tcp). The two stacks are run one at a time, manually.
+4. Ports of wg-easy stay as in `synology-split-tunnel` (51820/udp, 51821/tcp). The two
+   stacks never run at the same time, but both stay deployed: the USA stack starts
+   automatically, the VLESS stack (`synology-split-tunnel`) only by hand. Switching is
+   stop one project / start the other in DSM Container Manager. Container names therefore
+   differ between the stacks (amended 2026-10-01).
 5. End-to-end test on the developer Mac may use the working VLESS/OpenVPN secrets from
    `16_worked_proxy_chain`, locally only, never committed.
 
@@ -75,8 +81,28 @@ All three share wg-easy's network namespace (`network_mode: "service:wg-easy"`).
 | `sing-box` | `ghcr.io/sagernet/sing-box:v1.13.6` | `mixed` inbound on `127.0.0.1:1080` → VLESS outbound. No TUN, no `privileged`, no `/dev/net/tun`, plain `sing-box run` entrypoint |
 | `openvpn` | local build from `openvpn-client/` | Owns `tun0`. Entrypoint runs `setup-routing.sh` (fail → exit 1), prepares the profile, `exec openvpn`. Needs `privileged: true` (writes `/proc/sys`) and `/dev/net/tun` |
 
-`depends_on`: `sing-box` → `wg-easy`; `openvpn` → `wg-easy`, `sing-box`. Restart policy
-`unless-stopped` for all.
+Container names: `wg-easy-usa`, `sing-box-usa`, `openvpn-usa` (service names stay
+`wg-easy`, `sing-box`, `openvpn`). `depends_on`: `sing-box` → `wg-easy`; `openvpn` →
+`wg-easy`, `sing-box`. Restart policy `always` for all (see "Coexistence with
+synology-split-tunnel").
+
+### Coexistence with synology-split-tunnel
+
+Both stacks are deployed on the Synology at once; exactly one runs.
+
+- **Distinct container names.** A stopped container still owns its name, so with equal
+  names the second stack cannot even be created. The USA stack uses the `-usa` suffix;
+  `synology-split-tunnel` keeps `wg-easy` and `sing-box`. Compose project names already
+  differ (directory names).
+- **Same ports.** Both publish 51820/udp and 51821/tcp, so starting one stack while the
+  other runs fails on the port bind — a guard against running both. Both use the same
+  WireGuard keys (`wg-data/` copied), so the Mikrotik peer needs no change when switching.
+- **USA starts on every boot:** `restart: always`. A manual stop in Container Manager holds
+  until the Docker daemon restarts (DSM reboot), then the USA stack comes back.
+- **VLESS never starts by itself:** `synology-split-tunnel` gets `restart: "no"` for both
+  containers. Cost: a crashed sing-box there is not restarted automatically.
+- **Switching** (README/install.md): stop the running project in Container Manager, start
+  the other one. After a DSM reboot the USA stack is the one running.
 
 ### Files
 
@@ -228,8 +254,8 @@ The rule: traffic from `wg0` never leaves via `eth0`.
 |---|---|---|
 | Synology boot / first start | wg-easy starts with forwarding off; `openvpn` installs the kill switch, enables forwarding; `route-up` adds the tun0 route after connect | automatic |
 | sing-box down/restart | OpenVPN's TCP connection drops; OpenVPN reconnects; traffic is blocked meanwhile | automatic; `route-up` restores the route |
-| OpenVPN process exits | container exits, `tun0` disappears, `unreachable` blocks | `restart: unless-stopped`; script rerun is idempotent |
-| Bad profile / `AUTH_FAILED` | container restarts in a loop, traffic blocked, reason in `docker logs openvpn` | fix `openvpn/` |
+| OpenVPN process exits | container exits, `tun0` disappears, `unreachable` blocks | `restart: always`; script rerun is idempotent |
+| Bad profile / `AUTH_FAILED` | container restarts in a loop, traffic blocked, reason in `docker logs openvpn-usa` | fix `openvpn/` |
 | wg-easy alone restarted/recreated | new netns has forwarding off → blocked; sing-box/openvpn stay attached to the old netns | `docker compose up -d --force-recreate sing-box openvpn` (README) |
 
 ## Testing
@@ -277,9 +303,10 @@ Secrets stay in a scratch directory outside the repository.
 ### Manual acceptance on the Synology
 
 - from a `vpn-clients` PC, `curl ifconfig.me` returns the USA IP;
-- `docker stop openvpn` → no internet on that PC; `docker start openvpn` → restored;
-- `docker stop sing-box` → no internet; start → restored;
-- `docker logs openvpn` shows the kill switch line and `route-up` line, no errors.
+- `docker stop openvpn-usa` → no internet on that PC; `docker start openvpn-usa` → restored;
+- `docker stop sing-box-usa` → no internet; start → restored;
+- `docker logs openvpn-usa` shows the kill switch line and `route-up` line, no errors;
+- switching: stop the USA project and start `synology-split-tunnel` in Container Manager → VLESS exit; reboot DSM → only the USA stack runs.
 
 ## Acceptance criteria
 
@@ -295,7 +322,7 @@ Secrets stay in a scratch directory outside the repository.
 ## Risks and open items
 
 - **Synology kernel netfilter.** DSM may lack `nf_tables`; the script prefers
-  `iptables-legacy`. Cannot be verified locally — check `docker logs openvpn` on first run.
+  `iptables-legacy`. Cannot be verified locally — check `docker logs openvpn-usa` on first run.
 - **TCP-over-TCP.** OpenVPN/TCP inside VLESS/TCP degrades under packet loss; inherent to
   the chosen transport.
 - **MTU/MSS.** Not tuned; Mikrotik MSS clamping stays. Add `mssfix` only if breakage is
