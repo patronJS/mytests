@@ -101,14 +101,14 @@ chmod 600 sing-box/config.json openvpn/*
 
 ### 4. Остановить другой стек
 
-Этот стек и `synology-split-tunnel` используют одни и те же порты (51820/udp, 51821/tcp) и имена контейнеров, поэтому запускается только один из них:
+Этот стек и `synology-split-tunnel` используют одни порты (51820/udp, 51821/tcp), поэтому одновременно работает только один. Имена контейнеров у стеков разные, так что оба можно держать развёрнутыми в Container Manager. Перед запуском остановить стек VLESS:
 
 ```bash
 cd /volume1/docker/synology-split-tunnel
-docker compose down
+docker compose stop
 ```
 
-Чтобы Mikrotik-пир подключился без перенастройки, перенести ключи WireGuard: скопировать `wg-data/` из `synology-split-tunnel` в `Synology-USA-tunnel`. Настройки WireGuard (Host, Port, DNS, Allowed IPs, Keepalive) в wg-easy v15 задаются в Web UI и хранятся в `wg-data/`.
+Чтобы Mikrotik-пир подключался к обоим стекам без перенастройки, ключи WireGuard должны быть одинаковыми: скопировать `wg-data/` из `synology-split-tunnel` в `Synology-USA-tunnel`. Настройки WireGuard (Host, Port, DNS, Allowed IPs, Keepalive) в wg-easy v15 задаются в Web UI и хранятся в `wg-data/`.
 
 ### 5. Запуск
 
@@ -120,7 +120,7 @@ docker compose up -d --build
 ### 6. Проверка запуска
 
 ```bash
-docker logs openvpn
+docker logs openvpn-usa
 
 # Ожидаемый вывод (фрагменты):
 # [routing] kill switch: wg0 traffic blocked unless tun0 is up
@@ -143,19 +143,30 @@ curl -s https://ifconfig.me
 Проверка kill switch:
 
 ```bash
-docker stop openvpn     # на ПК интернета нет
-docker start openvpn    # через 10–60 с интернет вернулся, IP снова американский
-docker stop sing-box    # на ПК интернета нет
-docker start sing-box   # OpenVPN переподключается сам (до нескольких минут)
+docker stop openvpn-usa   # на ПК интернета нет
+docker start openvpn-usa  # через 10–60 с интернет вернулся, IP снова американский
+docker stop sing-box-usa  # на ПК интернета нет
+docker start sing-box-usa # OpenVPN переподключается сам (до нескольких минут)
 ```
+
+## Переключение USA ↔ VLESS
+
+Работает один стек: по умолчанию USA. После перезагрузки DSM всегда поднимается USA-стек (`restart: always`), VLESS-стек сам не запускается (`restart: "no"`).
+
+| Куда | Container Manager | Или по SSH |
+|------|-------------------|------------|
+| USA → VLESS | Проект `Synology-USA-tunnel` → «Остановить», затем `synology-split-tunnel` → «Запустить» | `cd /volume1/docker/Synology-USA-tunnel && docker compose stop && cd ../synology-split-tunnel && docker compose up -d` |
+| VLESS → USA | Проект `synology-split-tunnel` → «Остановить», затем `Synology-USA-tunnel` → «Запустить» | `cd /volume1/docker/synology-split-tunnel && docker compose stop && cd ../Synology-USA-tunnel && docker compose up -d` |
+
+Ошибка `port is already allocated` при запуске значит, что второй стек ещё работает: сначала остановить его.
 
 ## Восстановление
 
 | Ситуация | Команда |
 |----------|---------|
 | Перезапущен или пересоздан только wg-easy (обновление образа, `up` только для wg-easy) | `docker compose up -d --force-recreate sing-box openvpn` — sing-box и openvpn остаются в старом namespace, а в новом форвардинг выключен |
-| Изменён профиль или `cred.txt` | `docker restart openvpn` |
-| Изменён `sing-box/config.json` | `docker restart sing-box` (OpenVPN переподключится сам) |
+| Изменён профиль или `cred.txt` | `docker restart openvpn-usa` |
+| Изменён `sing-box/config.json` | `docker restart sing-box-usa` (OpenVPN переподключится сам) |
 | Обновить образ OpenVPN-клиента | `docker compose build --pull openvpn && docker compose up -d openvpn` |
 
 ## Настройка Mikrotik
@@ -221,9 +232,9 @@ docker start sing-box   # OpenVPN переподключается сам (до 
 |---------|---------------|
 | `openvpn` перезапускается, в логе `[openvpn] ERROR: ...` | Профиль отклонён, причина в сообщении: UDP, имя хоста в `remote`, `<connection>`, `config`, нет `cred.txt`, ноль или несколько `.ovpn` |
 | В логе `AUTH_FAILED` | Логин/пароль в `openvpn/cred.txt` |
-| Нет строки `[route-up]`, в логе повторяются попытки подключения к `127.0.0.1:1080` | sing-box или VLESS: `docker logs sing-box`, credentials в `config.json` |
+| Нет строки `[route-up]`, в логе повторяются попытки подключения к `127.0.0.1:1080` | sing-box или VLESS: `docker logs sing-box-usa`, credentials в `config.json` |
 | `[routing] ERROR: iptables not found` или `cannot add iptables rules` | Ядро DSM не поддерживает нужный netfilter. Проверить: `docker run --rm --privileged --entrypoint iptables-legacy usa-tunnel-openvpn -t nat -S` |
-| Нет интернета у vpn-clients, в логе всё без ошибок | `docker exec openvpn ip route show table 100` — должна быть строка `default dev tun0`. Без неё трафик блокируется kill switch (намеренно) |
+| Нет интернета у vpn-clients, в логе всё без ошибок | `docker exec openvpn-usa ip route show table 100` — должна быть строка `default dev tun0`. Без неё трафик блокируется kill switch (намеренно) |
 | Сайты не открываются или грузятся частично | MSS clamping на Mikrotik (см. выше) |
 | Медленно | TCP внутри TCP (OpenVPN/TCP через VLESS) проседает при потерях — это свойство схемы. Проверить MSS clamping и CPU Synology |
 | WG handshake не проходит | Сверить ключи в wg-easy Web UI и peer на Mikrotik |
@@ -232,12 +243,12 @@ docker start sing-box   # OpenVPN переподключается сам (до 
 ### Полезные команды
 
 ```bash
-docker logs -f openvpn                          # kill switch, OpenVPN, route-up
-docker logs -f sing-box                         # VLESS
-docker exec wg-easy wg show                     # WireGuard
-docker exec openvpn ip rule show                # должно быть: iif wg0 lookup 100
-docker exec openvpn ip route show table 100     # default dev tun0 + unreachable default
-docker exec openvpn cat /tmp/run.ovpn           # профиль, с которым запущен OpenVPN
+docker logs -f openvpn-usa                      # kill switch, OpenVPN, route-up
+docker logs -f sing-box-usa                     # VLESS
+docker exec wg-easy-usa wg show                 # WireGuard
+docker exec openvpn-usa ip rule show            # должно быть: iif wg0 lookup 100
+docker exec openvpn-usa ip route show table 100 # default dev tun0 + unreachable default
+docker exec openvpn-usa cat /tmp/run.ovpn       # профиль, с которым запущен OpenVPN
 ```
 
 ## Безопасность

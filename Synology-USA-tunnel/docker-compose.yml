@@ -1,7 +1,7 @@
 services:
   wg-easy:
     image: ghcr.io/wg-easy/wg-easy:15.2.2
-    container_name: wg-easy
+    container_name: wg-easy-usa
     # wg-easy v15 ignores WG_* vars: host, port, DNS, allowed IPs and
     # keepalive live in the Web UI (Admin Panel), stored in ./wg-data.
     environment:
@@ -24,20 +24,22 @@ services:
       - net.ipv4.conf.all.src_valid_mark=1
       - net.ipv6.conf.all.disable_ipv6=0
       - net.ipv6.conf.default.disable_ipv6=0
-    restart: unless-stopped
+    # Always: the USA stack comes back on every DSM boot, even after a manual
+    # stop. synology-split-tunnel uses restart "no" and is started by hand.
+    restart: always
 
   # Local SOCKS (127.0.0.1:1080) -> VLESS+Reality. Plain proxy: no TUN, no
   # routing changes; its own connection leaves via eth0 (main table).
   sing-box:
     image: ghcr.io/sagernet/sing-box:v1.13.6
-    container_name: sing-box
+    container_name: sing-box-usa
     command: ["run", "-c", "/etc/sing-box/config.json"]
     volumes:
       - ./sing-box:/etc/sing-box:ro
     network_mode: "service:wg-easy"
     depends_on:
       - wg-easy
-    restart: unless-stopped
+    restart: always
 
   # OpenVPN client (tun0) whose TCP connection goes through sing-box's SOCKS.
   # Runs setup-routing.sh (kill switch, forwarding, NAT); route-up.sh points
@@ -45,7 +47,7 @@ services:
   openvpn:
     build: ./openvpn-client
     image: usa-tunnel-openvpn
-    container_name: openvpn
+    container_name: openvpn-usa
     volumes:
       - ./openvpn:/openvpn:ro
       - ./scripts/setup-routing.sh:/setup-routing.sh:ro
@@ -57,4 +59,4 @@ services:
     depends_on:
       - wg-easy
       - sing-box
-    restart: unless-stopped
+    restart: always
