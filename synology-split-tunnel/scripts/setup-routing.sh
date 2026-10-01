@@ -1,5 +1,20 @@
 #!/bin/sh
 
+# Kill switch first, before waiting for wg0 and before anything slow (apk add):
+# while tun0 is absent (startup, sing-box crash) wg0 traffic would fall through
+# to the main table -> eth0. A high-metric unreachable default in table 100
+# stays behind the tun0 default (metric 0) and blocks that leak. Both steps are
+# idempotent (no flush/del), so a rerun never opens a gap; the iif rule matches
+# by name, so wg0 does not have to exist yet. On failure, fail closed.
+if ! ip route replace unreachable default metric 4000 table 100 || \
+   ! { ip rule show | grep -q "iif wg0 lookup 100" || \
+       ip rule add iif wg0 table 100 priority 100; }; then
+    echo "[routing] ERROR: cannot install kill switch, disabling forwarding"
+    sysctl -w net.ipv4.ip_forward=0
+    exit 1
+fi
+echo "[routing] kill switch: wg0 traffic blocked unless tun0 is up"
+
 # Clean up stale tun0 from a previous crash / restart
 ip link set tun0 down 2>/dev/null || true
 ip link delete tun0 2>/dev/null || true
@@ -54,11 +69,7 @@ else
     echo "[routing] WARNING: iptables not available"
 fi
 
-# --- policy routing (clean up stale state from previous runs) ---
-ip route flush table 100 2>/dev/null || true
-ip rule del iif wg0 table 100 priority 100 2>/dev/null || true
-ip rule add iif wg0 table 100 priority 100 2>/dev/null || true
-
+# --- policy routing (iif wg0 -> table 100 installed above) ---
 # Table 100: LAN stays on wg0
 ip route replace 192.168.0.0/16 dev wg0 table 100 2>/dev/null || true
 ip route replace 10.0.0.0/8 dev wg0 table 100 2>/dev/null || true

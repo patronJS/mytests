@@ -20,7 +20,7 @@ wg-easy (WG-сервер, интерфейс wg0)
   |
   | policy routing: iif wg0 -> table 100 -> default via tun0
   v
-sing-box (интерфейс tun0, stack: system, общий network namespace с wg-easy)
+sing-box (интерфейс tun0, stack: gvisor, общий network namespace с wg-easy)
   |
   | весь трафик --> VLESS+REALITY --> VPS --> Интернет
 ```
@@ -83,6 +83,8 @@ cd /volume1/docker/synology-split-tunnel
 docker compose down
 ```
 
+Настройки WireGuard (Host, Port, DNS, Allowed IPs, Keepalive) в wg-easy v15 задаются в Web UI (Admin Panel) и хранятся в `./wg-data/`; переменные `WG_*` в compose v15 игнорирует.
+
 При миграции со старой связки `tun2socks + mihomo` сохранить `./wg-data/` — там WireGuard-ключи. Mikrotik-пир переподключится без перенастройки.
 
 ### 4. Запуск
@@ -98,6 +100,7 @@ docker compose up -d
 docker logs sing-box
 
 # Ожидаемый вывод:
+# [routing] kill switch: wg0 traffic blocked unless tun0 is up
 # [routing] wg0 is up
 # [routing] iptables rules applied
 # [routing] table 100: LAN via wg0, waiting for tun0...
@@ -177,9 +180,9 @@ curl -s https://ifconfig.me
 | Симптом | Что проверить |
 |---------|---------------|
 | sing-box не запускается | `docker logs sing-box` — ошибка в config.json |
-| Нет интернета у vpn-clients | `docker logs sing-box` — есть ли `default route set to tun0` |
+| Нет интернета у vpn-clients | `docker logs sing-box` — есть ли `default route set to tun0`. Без tun0 трафик блокируется kill switch (намеренно, чтобы не утекал мимо VPS). Форвардинг в wg-easy стартует выключенным и включается скриптом sing-box: после перезапуска одного wg-easy выполнить `docker restart sing-box`, после его пересоздания (обновление образа, `up` только для wg-easy) — `docker compose up -d --no-deps --force-recreate sing-box` |
 | Сайты не открываются | MSS clamping на Mikrotik (см. выше) |
-| Медленная загрузка | Проверить CPU Synology; MSS clamping; `stack: system` в config.json |
+| Медленная загрузка | Проверить CPU Synology; MSS clamping; `stack: gvisor` (userspace) грузит CPU сильнее — при упоре в CPU попробовать `stack: system` в config.json |
 | VPN/сервис поверх туннеля не работает | Исключить IP из туннеля (см. «Исключение сервисов») |
 | VPS недоступен | VLESS credentials в config.json |
 | WG handshake не проходит | Сверить ключи в wg-easy Web UI и peer на Mikrotik |
