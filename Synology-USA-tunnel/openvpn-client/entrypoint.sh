@@ -28,18 +28,23 @@ BEGIN {
     n = split("dev dev-type up down script-security route-up redirect-gateway socks-proxy http-proxy auth-user-pass", d, " ")
     for (i = 1; i <= n; i++) drop[d[i]] = 1
 }
+NR == 1 { sub(/^\357\273\277/, "") }
 inline { print > out; if ($1 ~ /^<\//) inline = 0; next }   # inline <tag> block: copy verbatim
-{ sub(/^--/, "", $1) }                                     # OpenVPN accepts "--remote" in files too
+{ sub(/^[ \t]*--/, "") }                                  # OpenVPN accepts "--remote" in files too
+{
+    fields = NF
+    for (i = 1; i <= NF; i++) if ($i ~ /^[#;]/) { fields = i - 1; break }
+}
 $1 ~ /^<connection>/ { fail("<connection> blocks are not supported") }
 $1 ~ /^<[^\/]/ { inline = 1; print > out; next }
 $1 == "config" { fail("config includes are not supported") }
-$1 == "proto" { proto = $2 }
+$1 == "proto" { proto = fields >= 2 ? $2 : "" }
 $1 == "auth-user-pass" { auth = 1 }
 $1 == "remote" {
     remotes++
-    if (!ipv4($2)) fail("remote must be a numeric IPv4 address (a hostname would be resolved outside VLESS): " $0)
-    if (NF >= 4 && $4 !~ /^tcp/) fail("remote must use TCP (socks-proxy is TCP-only): " $0)
-    if (NF < 4) bare = 1
+    if (!ipv4(fields >= 2 ? $2 : "")) fail("remote must be a numeric IPv4 address (a hostname would be resolved outside VLESS): " $0)
+    if (fields >= 4 && $4 !~ /^tcp/) fail("remote must use TCP (socks-proxy is TCP-only): " $0)
+    if (fields < 4) bare = 1
 }
 !($1 in drop) { print > out }
 END {

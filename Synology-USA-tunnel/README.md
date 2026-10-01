@@ -85,7 +85,7 @@ Synology-USA-tunnel/
 - **`remote` только с IPv4-адресом**. Имя хоста пришлось бы резолвить через DNS провайдера, мимо VLESS. Заменить имя на IP: `dig +short vpn.example.com`.
 - Без блоков `<connection>` и директивы `config`.
 
-Сам файл не меняется. При старте из него собирается `/tmp/run.ovpn`: удаляются `dev`, `dev-type`, `up`, `down`, `script-security`, `route-up`, `redirect-gateway`, `socks-proxy`, `http-proxy`, `auth-user-pass`; добавляются `dev tun0`, `socks-proxy 127.0.0.1 1080`, `route-nopull`, `route-noexec`, `route-up /route-up.sh` и `auth-user-pass /openvpn/cred.txt`. Маршруты, которые присылает сервер или которые записаны в профиле, игнорируются.
+Сам файл не меняется. При старте из него собирается `/tmp/run.ovpn`: удаляются `dev`, `dev-type`, `up`, `down`, `script-security`, `route-up`, `redirect-gateway`, `socks-proxy`, `http-proxy`, `auth-user-pass`; добавляются `dev tun0`, `dev-type tun`, `socks-proxy 127.0.0.1 1080`, `route-nopull`, `route-noexec`, `script-security 2`, `route-up /route-up.sh` и `auth-user-pass /openvpn/cred.txt`. Маршруты, которые присылает сервер или которые записаны в профиле, игнорируются.
 
 ### 3. Скопировать на Synology
 

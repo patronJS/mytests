@@ -144,5 +144,27 @@ rc=$?
 if [ "$rc" -eq 0 ] && [ "$(count "dev tun0")" = 1 ] && [ "$(count "socks-proxy 127.0.0.1 1080")" = 1 ]; then pass "second start in the same container rebuilds the profile"
 else fail "second start in the same container rebuilds the profile" "exit $rc or duplicated lines"; fi
 
+# --- final-review regressions -------------------------------------------------
+d=$(new_dir); profile "$d" "$(printf '\357\273\277')config extra.conf
+$BASE"; : > "$d/cred.txt"
+rejects "UTF-8 BOM before config include" "$d" "config includes are not supported"
+
+d=$(new_dir); profile "$d" "$(printf '\357\273\277')$BASE"; : > "$d/cred.txt"
+run "$d"
+if [ "$rc" -eq 0 ] && has "client" && ! printf '%s' "$out" | grep -qF "$(printf '\357\273\277')"; then pass "UTF-8 BOM is stripped"
+else fail "UTF-8 BOM is stripped" "exit $rc or BOM preserved"; fi
+
+d=$(new_dir); profile "$d" "$(base 'proto tcp' 'remote 203.0.113.10 443 # primary')"; : > "$d/cred.txt"
+accepts "trailing comment on remote line" "$d"
+
+d=$(new_dir); profile "$d" "$(base 'proto tcp' 'remote 203.0.113.10 1194 udp # x')"; : > "$d/cred.txt"
+rejects "trailing comment does not hide udp" "$d" "remote must use TCP"
+
+d=$(new_dir); profile "$d" "$BASE
+verify-x509-name \"CN  Two\" name"; : > "$d/cred.txt"
+run "$d"
+if [ "$rc" -eq 0 ] && has 'verify-x509-name "CN  Two" name'; then pass "kept lines keep their spacing"
+else fail "kept lines keep their spacing" "exit $rc or spacing changed"; fi
+
 [ "$failures" -eq 0 ] || { echo "$failures case(s) failed"; exit 1; }
 echo "all entrypoint cases passed"
