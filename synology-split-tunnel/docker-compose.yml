@@ -25,7 +25,9 @@ services:
       - net.ipv4.conf.all.src_valid_mark=1
       - net.ipv6.conf.all.disable_ipv6=0
       - net.ipv6.conf.default.disable_ipv6=0
-    restart: unless-stopped
+    # Never autostart: started by hand only. Synology-USA-tunnel (restart
+    # always) is the default stack; both publish the same ports.
+    restart: "no"
 
   sing-box:
     image: ghcr.io/sagernet/sing-box:v1.13.6
@@ -39,7 +41,7 @@ services:
     network_mode: "service:wg-easy"
     depends_on:
       - wg-easy
-    restart: unless-stopped
+    restart: "no"
     entrypoint:
       - /bin/sh
       - -c
