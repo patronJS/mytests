@@ -5,3 +5,5 @@ playbook.yml
 .mcp.json
 Synology-USA-tunnel/openvpn/*
 !Synology-USA-tunnel/openvpn/.gitkeep
+.DS_Store
+OpenWrt/worked-setup.json
