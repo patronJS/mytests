@@ -202,25 +202,62 @@ docker start sing-box-usa # OpenVPN переподключается сам (д�
 /ip firewall mangle add chain=forward protocol=tcp tcp-flags=syn in-interface=wg-tunnel action=change-mss new-mss=clamp-to-pmtu passthrough=yes comment="MSS clamp WG in"
 ```
 
-### Исключение сервисов из туннеля
+### Исключения: что идёт напрямую через провайдера
 
-Некоторые сервисы (корпоративные VPN, банковские приложения и т.д.) не работают через цепочку прокси из-за MTU или гео-ограничений. Их нужно пускать напрямую, минуя WG-туннель.
+По умолчанию весь трафик `vpn-clients` идёт через USA. Исключения задаются вручную в address-list `direct`: адреса из него уходят от провайдера напрямую и не проходят через Synology. Всё, чего нет в списке, по-прежнему идёт через USA, поэтому забытый адрес не утечёт мимо туннеля.
 
-Правило ставится **перед** `via-wg` (параметр `place-before=3`):
+Нужны одно mangle-правило (ставится один раз) и записи в списке (добавляются по мере надобности). Все шаги — в WinBox; команды ниже можно вставить в **New Terminal**.
+
+#### 1. Правило `direct` (один раз)
+
+1. **Files → Backup → Backup**: резервная копия до изменений.
+2. **IP → Firewall → Mangle**: найти правило с **New Routing Mark** = `via-wg`.
+3. **+**, новое правило:
+   - **General**: Chain `prerouting`;
+   - **Advanced**: Src. Address List `vpn-clients`, Dst. Address List `direct`;
+   - **Action**: `accept`;
+   - **Comment**: `direct`.
+4. Перетащить правило мышью **выше** `via-wg`. Если маркировка сделана в два шага (mark-connection, затем mark-routing), ставить выше обоих.
 
 ```routeros
-# Исключить IP из туннеля (трафик пойдёт напрямую)
-/ip firewall mangle add chain=prerouting action=accept dst-address=89.175.46.105 src-address-list=vpn-clients comment="HSE VPN direct" place-before=3
-
-# Можно добавить несколько адресов или подсети
-/ip firewall mangle add chain=prerouting action=accept dst-address=1.2.3.0/24 src-address-list=vpn-clients comment="Bank direct" place-before=3
+# N — номер (#) правила via-wg в /ip firewall mangle print
+/ip firewall mangle add chain=prerouting src-address-list=vpn-clients dst-address-list=direct action=accept comment="direct" place-before=N
 ```
 
-Проверить порядок правил:
+Старые accept-правила с `dst-address=...` из прежней версии инструкции перенести в список `direct` (шаг 2), а сами правила удалить.
+
+#### 2. Добавить IP или подсеть
+
+**IP → Firewall → Address Lists → +**: Name `direct`, Address — IP или подсеть, Comment — что это.
+
 ```routeros
-/ip firewall mangle print
-# accept-правила должны стоять ДО правила с mark-routing via-wg
+/ip firewall address-list add list=direct address=89.175.46.105 comment="HSE VPN"
 ```
+
+Действует сразу. Соединение, открытое до добавления, может зависнуть: переподключить приложение или перезагрузить страницу.
+
+#### 3. Добавить домен
+
+Вариант для простого случая: в **Address** из шага 2 вписать домен (`example.ru`). Mikrotik сам резолвит его и держит IP в списке актуальными (запись `D`, dynamic). Ограничения: поддомены (`www.example.ru`, `api.example.ru`) добавляются отдельными записями. Если сайт на CDN отдаёт клиенту другие IP, чем роутеру, часть трафика пойдёт через USA.
+
+Надёжный вариант — с поддоменами и ровно теми IP, что получил клиент. Работает, только если устройства из `vpn-clients` используют Mikrotik как DNS:
+
+1. **IP → DNS**: включить **Allow Remote Requests**. Проверить, что снаружи DNS закрыт: в **IP → Firewall → Filter Rules** есть `drop` в chain `input` для In. Interface List `!LAN` (в стандартной конфигурации — `defconf: drop all not coming from LAN`). Без него роутер станет открытым резолвером в интернете.
+2. **IP → DHCP Server → Networks** → сеть LAN → **DNS Servers**: адрес Mikrotik в LAN (обычно `192.168.88.1`). Устройства получат его при продлении аренды DHCP; быстрее — переподключить Wi-Fi или кабель.
+3. **IP → DNS → Static → +**: Name `example.ru`, Type `FWD`, **Match Subdomain** ✓, **Address List** `direct`, Comment. Forward To оставить пустым: запрос уйдёт на обычные DNS-серверы роутера. Если WinBox не сохраняет запись без него, указать тот же сервер, что в **IP → DNS → Servers**. Если полей Match Subdomain и Address List нет, обновить RouterOS: **System → Packages → Check For Updates**.
+
+```routeros
+/ip dns set allow-remote-requests=yes
+/ip dns static add name=example.ru type=FWD match-subdomain=yes address-list=direct comment="example"
+```
+
+IP попадает в список в момент DNS-запроса клиента и живёт там на время TTL записи. Поэтому после добавления домена нужно заново открыть сайт на устройстве. Если в браузере включён DoH (Chrome «Secure DNS», Firefox «DNS over HTTPS»), запросы идут мимо Mikrotik и список не заполняется.
+
+#### Проверка
+
+- С устройства из `vpn-clients` открыть адрес из `direct` и `https://ifconfig.me`. Первый должен видеть домашний IP, второй — IP США.
+- **IP → Firewall → Mangle**: у правила `direct` растут счётчики **Bytes / Packets**.
+- **IP → Firewall → Address Lists**: у доменных записей появляются IP.
 
 ### Управление списком vpn-clients
 
